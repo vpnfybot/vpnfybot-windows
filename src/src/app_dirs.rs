@@ -69,11 +69,13 @@ impl AppDirs {
         // Создаем файл информации приложения
         let info_file = self.root.join("app.info");
         if !info_file.exists() {
+            // Use compile-time package version so app.info reflects Cargo.toml
             let info = format!(
                 "@vpnfybot-windows Application\n\
-                 Version: 3.2.2\n\
+                 Version: {}\n\
                  Created: {}\n\
                  Install Root: {}\n",
+                env!("CARGO_PKG_VERSION"),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
