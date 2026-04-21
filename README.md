@@ -1,9 +1,8 @@
 # WireGuard split-tunneling solution with WireProxy + ProxyBridge w/ WinDivert under the hood 👻
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 <img src="https://github.com/vpnfybot/vpnfybot-windows/blob/main/src/interface.png?raw=true" alt="Alt text" width="320" height="410">
 
 English: [README.en.md](README.en.md)
 Русский: [README.ru.md](README.ru.md)
 
-License: MIT — see [LICENSE](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
