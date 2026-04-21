@@ -1,6 +1,6 @@
 # WireGuard split-tunneling solution with WireProxy + ProxyBridge w/ WinDivert under the hood 👻
 
-[interface](https://github.com/vpnfybot/vpnfybot-windows/blob/main/src/interface.png?raw=true)
+<img src="https://github.com/vpnfybot/vpnfybot-windows/blob/main/src/interface.png?raw=true" alt="Alt text" width="320" height="410">
 
 English: [README.en.md](README.en.md)
 Русский: [README.ru.md](README.ru.md)
