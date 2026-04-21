@@ -80,9 +80,9 @@ struct ServiceResult {
     wireproxy_info_addr: Option<String>,
 }
 
-const APP_TITLE: &str = "@vpnfybot-windows";
-const WINDOW_TITLE: &str = "@vpnfybot-windows";
-const NOTIFICATION_APP_ID: &str = "@vpnfybot-windows";
+const APP_TITLE: &str = "vpnfybot-windows";
+const WINDOW_TITLE: &str = "vpnfybot-windows";
+const NOTIFICATION_APP_ID: &str = "vpnfybot-windows";
 const SITES_EDITOR_CLASS: &str = "vpnfy_sites_editor_class";
 const SITE_TEXT_CONTAINER_CLASS: &str = "vpnfy_sites_text_container_class";
 const PROCESSES_EDITOR_CLASS: &str = "vpnfy_processes_editor_class";
