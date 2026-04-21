@@ -1,0 +1,4 @@
+C:\Users\vayzer\Desktop\vpnfywin-wireproxy\vpnfywin\proxybridge-master\Windows\StubProxyBridgeCore\obj\Release\net10.0-windows\StubProxyBridgeCore.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\vayzer\Desktop\vpnfywin-wireproxy\vpnfywin\proxybridge-master\Windows\StubProxyBridgeCore\obj\Release\net10.0-windows\StubProxyBridgeCore.AssemblyInfoInputs.cache
+C:\Users\vayzer\Desktop\vpnfywin-wireproxy\vpnfywin\proxybridge-master\Windows\StubProxyBridgeCore\obj\Release\net10.0-windows\StubProxyBridgeCore.AssemblyInfo.cs
+C:\Users\vayzer\Desktop\vpnfywin-wireproxy\vpnfywin\proxybridge-master\Windows\StubProxyBridgeCore\obj\Release\net10.0-windows\StubProxyBridgeCore.csproj.CoreCompileInputs.cache

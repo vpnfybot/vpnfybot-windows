@@ -1,0 +1,10 @@
+C:\Users\vayzer\Desktop\vpnfywin-wireproxy\vpnfywin\src\target\release\deps\error_code-0532d54b16c90bbd.d: C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\error-code-3.3.2\src\lib.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\error-code-3.3.2\src\defs.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\error-code-3.3.2\src\types.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\error-code-3.3.2\src\utils.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\error-code-3.3.2\src\posix.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\error-code-3.3.2\src\system.rs
+
+C:\Users\vayzer\Desktop\vpnfywin-wireproxy\vpnfywin\src\target\release\deps\liberror_code-0532d54b16c90bbd.rmeta: C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\error-code-3.3.2\src\lib.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\error-code-3.3.2\src\defs.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\error-code-3.3.2\src\types.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\error-code-3.3.2\src\utils.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\error-code-3.3.2\src\posix.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\error-code-3.3.2\src\system.rs
+
+C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\error-code-3.3.2\src\lib.rs:
+C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\error-code-3.3.2\src\defs.rs:
+C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\error-code-3.3.2\src\types.rs:
+C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\error-code-3.3.2\src\utils.rs:
+C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\error-code-3.3.2\src\posix.rs:
+C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\error-code-3.3.2\src\system.rs:

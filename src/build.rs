@@ -1,0 +1,99 @@
+// Сборочный скрипт: генерирует ico из png, а затем встраивает манифест и ресурсы.
+use embed_resource;
+use image::imageops::FilterType;
+use image::io::Reader as ImageReader;
+use image::GenericImageView;
+use image::ImageOutputFormat;
+use std::env;
+use std::fs;
+use std::io::{Cursor, Write};
+use std::path::{Path, PathBuf};
+
+fn main() {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let png_path = manifest_dir.join("gifs/vpnfy.png");
+    let ico_path = manifest_dir.join("vpnfy.ico");
+
+    if let Err(e) = generate_ico(&png_path, &ico_path) {
+        panic!("Failed to generate ico: {}", e);
+    }
+
+    let manifest = manifest_dir.join("app.rc");
+    embed_resource::compile(manifest.to_str().unwrap());
+
+    // Копируем файлы зависимостей в target/release/ при сборке в release режиме
+    if env::var("PROFILE").unwrap() == "release" {
+        copy_dependencies(&manifest_dir);
+    }
+}
+
+fn copy_dependencies(manifest_dir: &Path) {
+    // Проверяем наличие локальных копий файлов зависимостей для include_bytes!
+    let embedded_deps_dir = manifest_dir.join("embedded_deps");
+    let files_to_check = vec![
+        ("ProxyBridgeCore.dll", embedded_deps_dir.join("ProxyBridgeCore.dll")),
+        ("ProxyBridge_CLI.exe", embedded_deps_dir.join("ProxyBridge_CLI.exe")),
+        ("wireproxy.exe", embedded_deps_dir.join("wireproxy.exe")),
+        ("WinDivert.dll", embedded_deps_dir.join("WinDivert.dll")),
+        ("WinDivert64.sys", embedded_deps_dir.join("WinDivert64.sys")),
+    ];
+    
+    println!("cargo:warning=Проверка файлов зависимостей для include_bytes!...");
+    
+    let mut all_files_exist = true;
+    for (name, path) in files_to_check {
+        if path.exists() {
+            let size = match std::fs::metadata(&path) {
+                Ok(meta) => meta.len(),
+                Err(_) => 0,
+            };
+            println!("cargo:warning=Найден: {} ({} байт)", name, size);
+        } else {
+            println!("cargo:warning=ОШИБКА: Не найден: {} ({})", name, path.display());
+            all_files_exist = false;
+        }
+    }
+    
+    if !all_files_exist {
+        println!("cargo:warning=Совет: запустите copy_deps.ps1 для копирования зависимостей в embedded_deps/");
+        panic!("Некоторые файлы зависимостей не найдены. Запустите copy_deps.ps1 для копирования зависимостей.");
+    }
+    
+    println!("cargo:warning=Все файлы зависимостей найдены и будут встроены через include_bytes!");
+}
+
+fn generate_ico(png_path: &Path, ico_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let mut img = ImageReader::open(png_path)?.with_guessed_format()?.decode()?;
+    let (width, height) = img.dimensions();
+    if width > 256 || height > 256 {
+        let scale = 256.0 / width.max(height) as f32;
+        let new_width = (width as f32 * scale).round().max(1.0) as u32;
+        let new_height = (height as f32 * scale).round().max(1.0) as u32;
+        img = img.resize_exact(new_width, new_height, FilterType::Lanczos3);
+    }
+
+    let (width, height) = img.dimensions();
+    let mut png_bytes = Vec::new();
+    img.write_to(&mut Cursor::new(&mut png_bytes), ImageOutputFormat::Png)?;
+    let mut icon_data = Vec::new();
+
+    // ICONDIR header
+    icon_data.extend(&0u16.to_le_bytes()); // reserved
+    icon_data.extend(&1u16.to_le_bytes()); // image type (icon)
+    icon_data.extend(&1u16.to_le_bytes()); // number of images
+
+    // ICONDIRENTRY
+    icon_data.push(if width == 256 { 0 } else { width as u8 });
+    icon_data.push(if height == 256 { 0 } else { height as u8 });
+    icon_data.push(0); // color count
+    icon_data.push(0); // reserved
+    icon_data.extend(&1u16.to_le_bytes()); // planes
+    icon_data.extend(&32u16.to_le_bytes()); // bit count
+    icon_data.extend(&(png_bytes.len() as u32).to_le_bytes());
+    icon_data.extend(&(6 + 16u32).to_le_bytes()); // offset to image data
+
+    icon_data.extend(&png_bytes);
+    let mut file = fs::File::create(ico_path)?;
+    file.write_all(&icon_data)?;
+    Ok(())
+}

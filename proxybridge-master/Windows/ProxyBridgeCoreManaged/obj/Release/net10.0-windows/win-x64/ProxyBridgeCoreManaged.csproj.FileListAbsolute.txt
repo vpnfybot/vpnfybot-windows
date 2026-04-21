@@ -1,0 +1,4 @@
+C:\Users\vayzer\Desktop\vpnfywin-wireproxy\vpnfywin\proxybridge-master\Windows\ProxyBridgeCoreManaged\obj\Release\net10.0-windows\win-x64\ProxyBridgeCoreManaged.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\vayzer\Desktop\vpnfywin-wireproxy\vpnfywin\proxybridge-master\Windows\ProxyBridgeCoreManaged\obj\Release\net10.0-windows\win-x64\ProxyBridgeCoreManaged.AssemblyInfoInputs.cache
+C:\Users\vayzer\Desktop\vpnfywin-wireproxy\vpnfywin\proxybridge-master\Windows\ProxyBridgeCoreManaged\obj\Release\net10.0-windows\win-x64\ProxyBridgeCoreManaged.AssemblyInfo.cs
+C:\Users\vayzer\Desktop\vpnfywin-wireproxy\vpnfywin\proxybridge-master\Windows\ProxyBridgeCoreManaged\obj\Release\net10.0-windows\win-x64\ProxyBridgeCoreManaged.csproj.CoreCompileInputs.cache

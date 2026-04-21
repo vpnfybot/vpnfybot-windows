@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "dgSpecHash": "7+3S/+tFCT8=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\vayzer\\Desktop\\vpnfywin-wireproxy\\vpnfywin\\proxybridge-master\\Windows\\StubProxyBridgeCore\\StubProxyBridgeCore.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\vayzer\\.nuget\\packages\\system.runtime.compilerservices.unsafe\\6.0.0\\system.runtime.compilerservices.unsafe.6.0.0.nupkg.sha512"
+  ],
+  "logs": [
+    {
+      "code": "NU1510",
+      "level": "Warning",
+      "message": "PackageReference System.Runtime.CompilerServices.Unsafe не будет урезано. Рассмотрите возможность удаления этого пакета из зависимостей, так как он, вероятно, не требуется.",
+      "projectPath": "C:\\Users\\vayzer\\Desktop\\vpnfywin-wireproxy\\vpnfywin\\proxybridge-master\\Windows\\StubProxyBridgeCore\\StubProxyBridgeCore.csproj",
+      "warningLevel": 1,
+      "filePath": "C:\\Users\\vayzer\\Desktop\\vpnfywin-wireproxy\\vpnfywin\\proxybridge-master\\Windows\\StubProxyBridgeCore\\StubProxyBridgeCore.csproj",
+      "libraryId": "System.Runtime.CompilerServices.Unsafe",
+      "targetGraphs": [
+        "net10.0-windows7.0"
+      ]
+    }
+  ]
+}

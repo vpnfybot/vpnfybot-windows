@@ -1,0 +1,28 @@
+[package]
+name = "wg-gui"
+version = "3.2.2"
+edition = "2021"
+build = "build.rs"
+default-run = "vpnfybot-windows"
+
+[[bin]]
+name = "vpnfybot-windows"
+path = "src/vpnfybot_windows.rs"
+
+[dependencies]
+rfd = "0.14"
+eframe = { version = "0.27", default-features = false, features = ["wgpu", "glow"] }
+egui = "0.27"
+image = "0.24"
+anyhow = "1.0"
+winrt-notification = "0.5.1"
+raw-window-handle = "0.6"
+windows = { version = "0.48", features = ["Data_Xml_Dom", "UI_Notifications", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_UI_Input", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_Security"] }
+sysinfo = { version = "0.32", features = ["network"] }
+libloading = "0.8"
+log = "0.4"
+resvg = "0.47"
+
+[build-dependencies]
+embed-resource = "1.0"
+image = "0.24"

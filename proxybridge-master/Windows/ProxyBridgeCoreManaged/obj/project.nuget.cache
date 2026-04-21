@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "dgSpecHash": "MzeKvKRh5/4=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\vayzer\\Desktop\\vpnfywin-wireproxy\\vpnfywin\\proxybridge-master\\Windows\\ProxyBridgeCoreManaged\\ProxyBridgeCoreManaged.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\vayzer\\.nuget\\packages\\microsoft.netcore.app.runtime.win-x64\\10.0.5\\microsoft.netcore.app.runtime.win-x64.10.0.5.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\microsoft.windowsdesktop.app.runtime.win-x64\\10.0.5\\microsoft.windowsdesktop.app.runtime.win-x64.10.0.5.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\microsoft.aspnetcore.app.runtime.win-x64\\10.0.5\\microsoft.aspnetcore.app.runtime.win-x64.10.0.5.nupkg.sha512"
+  ],
+  "logs": []
+}

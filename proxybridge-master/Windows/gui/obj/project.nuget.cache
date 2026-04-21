@@ -1,0 +1,55 @@
+{
+  "version": 2,
+  "dgSpecHash": "jd7BcNS6blw=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\vayzer\\Desktop\\vpnfywin-wireproxy\\vpnfywin\\proxybridge-master\\Windows\\gui\\ProxyBridge.GUI.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\vayzer\\.nuget\\packages\\avalonia\\11.3.11\\avalonia.11.3.11.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\avalonia.angle.windows.natives\\2.1.25547.20250602\\avalonia.angle.windows.natives.2.1.25547.20250602.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\avalonia.buildservices\\11.3.2\\avalonia.buildservices.11.3.2.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\avalonia.desktop\\11.3.11\\avalonia.desktop.11.3.11.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\avalonia.fonts.inter\\11.3.11\\avalonia.fonts.inter.11.3.11.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\avalonia.freedesktop\\11.3.11\\avalonia.freedesktop.11.3.11.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\avalonia.native\\11.3.11\\avalonia.native.11.3.11.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\avalonia.remote.protocol\\11.3.11\\avalonia.remote.protocol.11.3.11.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\avalonia.skia\\11.3.11\\avalonia.skia.11.3.11.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\avalonia.themes.fluent\\11.3.11\\avalonia.themes.fluent.11.3.11.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\avalonia.win32\\11.3.11\\avalonia.win32.11.3.11.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\avalonia.x11\\11.3.11\\avalonia.x11.11.3.11.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\harfbuzzsharp\\8.3.1.1\\harfbuzzsharp.8.3.1.1.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\harfbuzzsharp.nativeassets.linux\\8.3.1.1\\harfbuzzsharp.nativeassets.linux.8.3.1.1.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\harfbuzzsharp.nativeassets.macos\\8.3.1.1\\harfbuzzsharp.nativeassets.macos.8.3.1.1.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\harfbuzzsharp.nativeassets.webassembly\\8.3.1.1\\harfbuzzsharp.nativeassets.webassembly.8.3.1.1.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\harfbuzzsharp.nativeassets.win32\\8.3.1.1\\harfbuzzsharp.nativeassets.win32.8.3.1.1.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\microcom.runtime\\0.11.0\\microcom.runtime.0.11.0.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\microsoft.dotnet.ilcompiler\\10.0.5\\microsoft.dotnet.ilcompiler.10.0.5.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\microsoft.net.illink.tasks\\10.0.5\\microsoft.net.illink.tasks.10.0.5.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\runtime.win-x64.microsoft.dotnet.ilcompiler\\10.0.5\\runtime.win-x64.microsoft.dotnet.ilcompiler.10.0.5.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\skiasharp\\2.88.9\\skiasharp.2.88.9.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\skiasharp.nativeassets.linux\\2.88.9\\skiasharp.nativeassets.linux.2.88.9.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\skiasharp.nativeassets.macos\\2.88.9\\skiasharp.nativeassets.macos.2.88.9.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\skiasharp.nativeassets.webassembly\\2.88.9\\skiasharp.nativeassets.webassembly.2.88.9.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\skiasharp.nativeassets.win32\\2.88.9\\skiasharp.nativeassets.win32.2.88.9.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\tmds.dbus.protocol\\0.21.2\\tmds.dbus.protocol.0.21.2.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\microsoft.netcore.app.runtime.win-x64\\10.0.5\\microsoft.netcore.app.runtime.win-x64.10.0.5.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\microsoft.windowsdesktop.app.runtime.win-x64\\10.0.5\\microsoft.windowsdesktop.app.runtime.win-x64.10.0.5.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\microsoft.aspnetcore.app.runtime.win-x64\\10.0.5\\microsoft.aspnetcore.app.runtime.win-x64.10.0.5.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\microsoft.netcore.app.runtime.nativeaot.win-x64\\10.0.5\\microsoft.netcore.app.runtime.nativeaot.win-x64.10.0.5.nupkg.sha512",
+    "C:\\Users\\vayzer\\.nuget\\packages\\runtime.win-x64.microsoft.dotnet.ilcompiler\\10.0.5\\runtime.win-x64.microsoft.dotnet.ilcompiler.10.0.5.nupkg.sha512"
+  ],
+  "logs": [
+    {
+      "code": "NU1903",
+      "level": "Warning",
+      "message": "У пакета \"Tmds.DBus.Protocol\" 0.21.2 есть известная уязвимость https://github.com/advisories/GHSA-xrw6-gwf8-vvr9 (уровень серьезности: высокий уровень)",
+      "projectPath": "C:\\Users\\vayzer\\Desktop\\vpnfywin-wireproxy\\vpnfywin\\proxybridge-master\\Windows\\gui\\ProxyBridge.GUI.csproj",
+      "warningLevel": 1,
+      "filePath": "C:\\Users\\vayzer\\Desktop\\vpnfywin-wireproxy\\vpnfywin\\proxybridge-master\\Windows\\gui\\ProxyBridge.GUI.csproj",
+      "libraryId": "Tmds.DBus.Protocol",
+      "targetGraphs": [
+        "net10.0-windows",
+        "net10.0-windows/win-x64"
+      ]
+    }
+  ]
+}
