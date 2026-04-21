@@ -4,7 +4,6 @@
 
 Windows-решение для раздельного туннелирования (split-tunneling) через WireGuard, использующее WireProxy, ProxyBridge и WinDivert для маршрутизации трафика по процессам и сайтам.
 
-Быстрые ссылки
 - WireProxy: https://github.com/windtf/wireproxy
 - ProxyBridge: https://github.com/InterceptSuite/ProxyBridge
 - WinDivert: https://github.com/basil00/WinDivert
