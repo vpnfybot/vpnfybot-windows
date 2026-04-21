@@ -4,7 +4,6 @@
 
 A Windows-focused WireGuard split-tunneling toolkit combining WireProxy, ProxyBridge and WinDivert to provide per-process and per-site routing through a WireGuard tunnel.
 
-Quick links
 - WireProxy: https://github.com/windtf/wireproxy
 - ProxyBridge: https://github.com/InterceptSuite/ProxyBridge
 - WinDivert: https://github.com/basil00/WinDivert
