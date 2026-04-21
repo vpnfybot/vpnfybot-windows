@@ -1,4 +1,4 @@
-# wireproxy
+# wireproxy 
 
 [![ISC licensed](https://img.shields.io/badge/license-ISC-blue)](./LICENSE)
 [![Build status](https://github.com/octeep/wireproxy/actions/workflows/build.yml/badge.svg)](https://github.com/octeep/wireproxy/actions)

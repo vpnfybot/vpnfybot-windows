@@ -1,4 +1,4 @@
-# WireGuard split-tunneling solution powered by WireProxy + ProxyBridge w/ WinDivert 
+# WireGuard split-tunneling solution powered by WireProxy + ProxyBridge w/ WinDivert
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![CI](https://img.shields.io/github/actions/workflow/status/USERNAME/REPO/ci.yml?branch=main)](https://github.com/USERNAME/REPO/actions) [![Latest Release](https://img.shields.io/github/v/release/USERNAME/REPO?label=release)](https://github.com/USERNAME/REPO/releases)
 

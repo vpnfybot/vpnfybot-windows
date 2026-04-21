@@ -1,7 +1,7 @@
 Microsoft (R) Windows (R) Resource Compiler Version 10.0.10011.16384
 Copyright (C) Microsoft Corporation.  All rights reserved.
 
-cargo:rustc-link-arg-bins=C:\Users\vayzer\Desktop\vpnfywin-wireproxy\vpnfywin\src\target\release\build\wg-gui-063992dd84ee45ba\out/app.lib
+cargo:rustc-link-arg-bins=C:\Users\vayzer\Desktop\vpnfybot-windows\src\target\release\build\wg-gui-063992dd84ee45ba\out/app.lib
 cargo:warning=Проверка файлов зависимостей для include_bytes!...
 cargo:warning=Найден: ProxyBridgeCore.dll (174080 байт)
 cargo:warning=Найден: ProxyBridge_CLI.exe (6097920 байт)

@@ -1,4 +1,4 @@
-# ProxyBridge
+# ProxyBridge 
 
 <p align="center">
   <img src="img/logo.png" alt="ProxyBridge Logo" />
