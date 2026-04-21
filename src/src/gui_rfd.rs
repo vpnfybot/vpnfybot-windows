@@ -2679,15 +2679,110 @@ pub(crate) fn app_main() -> eframe::Result<()> {
     setup_firewall_rules();
     
     // Проверка обновлений — выполняется однократно при старте приложения
-    // Используем встроенный ProxyBridge_CLI.exe с флагом `--update`.
+    // Пытаемся определить origin remote и опросить GitHub Releases API
     // Запускаем в отдельном потоке, чтобы не блокировать GUI.
     {
         std::thread::spawn(|| {
-            if let Ok(deps) = embedded_deps_bytes::ExtractedDeps::get() {
-                let _ = std::process::Command::new(&deps.proxybridge_cli)
-                    .arg("--update")
-                    .stdin(std::process::Stdio::null())
-                    .spawn();
+            // Получаем URL origin (если есть)
+            let origin_out = std::process::Command::new("git")
+                .args(["remote", "get-url", "origin"])
+                .output();
+            let url = match origin_out {
+                Ok(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+                Err(_) => return,
+            };
+            if url.is_empty() {
+                return;
+            }
+
+            // Парсим owner/repo из URL (поддерживаем https и git@)
+            let mut owner = String::new();
+            let mut repo = String::new();
+            if url.contains("github.com") {
+                if url.starts_with("git@") {
+                    if let Some(pos) = url.find(':') {
+                        let path = &url[pos + 1..];
+                        let path = path.strip_suffix(".git").unwrap_or(path);
+                        let mut parts = path.splitn(2, '/');
+                        if let (Some(o), Some(r)) = (parts.next(), parts.next()) {
+                            owner = o.to_string();
+                            repo = r.to_string();
+                        }
+                    }
+                } else if url.starts_with("http") {
+                    if let Some(pos) = url.find("github.com/") {
+                        let path = &url[pos + "github.com/".len()..];
+                        let path = path.strip_suffix(".git").unwrap_or(path);
+                        let mut parts = path.splitn(2, '/');
+                        if let (Some(o), Some(r)) = (parts.next(), parts.next()) {
+                            owner = o.to_string();
+                            repo = r.to_string();
+                        }
+                    }
+                }
+            }
+            if owner.is_empty() || repo.is_empty() {
+                return;
+            }
+
+            let api_url = format!("https://api.github.com/repos/{}/{}/releases/latest", owner, repo);
+            let agent = "vpnfybot-windows-update-check";
+
+            // Выполняем запрос к GitHub
+            let resp = match ureq::get(&api_url).set("User-Agent", agent).call() {
+                Ok(r) => r,
+                Err(_) => return,
+            };
+
+            let json: serde_json::Value = match resp.into_json() {
+                Ok(j) => j,
+                Err(_) => return,
+            };
+
+            let latest_tag = json
+                .get("tag_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim_start_matches('v')
+                .to_string();
+            let current = env!("CARGO_PKG_VERSION");
+
+            let latest_ver = semver::Version::parse(&latest_tag).ok();
+            let current_ver = semver::Version::parse(current).ok();
+            if latest_ver.is_none() || current_ver.is_none() {
+                return;
+            }
+
+            if latest_ver.unwrap() <= current_ver.unwrap() {
+                // Уже последняя версия
+                return;
+            }
+
+            // Ищем Windows-инсталлятор в ассетах релиза
+            if let Some(assets) = json.get("assets").and_then(|a| a.as_array()) {
+                for asset in assets {
+                    if let (Some(name), Some(dl)) = (
+                        asset.get("name").and_then(|n| n.as_str()),
+                        asset.get("browser_download_url").and_then(|u| u.as_str()),
+                    ) {
+                        let lname = name.to_lowercase();
+                        if lname.ends_with(".exe") && (lname.contains("setup") || lname.contains("installer")) {
+                            // Скачиваем и запускаем установщик
+                            if let Ok(setup_resp) = ureq::get(dl).call() {
+                                if let Ok(bytes) = setup_resp.into_bytes() {
+                                    let tmp_path = std::env::temp_dir().join(name);
+                                    if std::fs::write(&tmp_path, &bytes).is_ok() {
+                                        #[cfg(target_os = "windows")]
+                                        {
+                                            let _ = std::process::Command::new(&tmp_path).spawn();
+                                        }
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
             }
         });
     }
