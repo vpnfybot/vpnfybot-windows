@@ -13,36 +13,6 @@ Overview
 
 This project implements a practical Windows solution for WireGuard split-tunneling, enabling you to route only selected applications or sites through a WireGuard tunnel while leaving other traffic on the normal network interface.
 
-Features
-
-- Per-process and per-site split-tunneling controls.
-- Tunnel-only traffic accounting using WireProxy `/metrics` endpoint (per-peer `tx_bytes` / `rx_bytes`).
-- Speeds and session totals computed from tunneled counters, updated once per second.
-- MB→GB unit switch when values exceed 1000 MB.
-- Native-looking text rendering on Windows using GDI/HFONT → bitmap → GPU texture pipeline for pixel-crisp UI.
-- DPI-aware layout, icon pinning and pixel-snapped rendering to avoid blurred text.
-
-How it works (brief)
-
-1. WireProxy manages the WireGuard peer connection and exposes a `/metrics` endpoint for totals.
-2. The GUI polls `/metrics` once per second and computes session deltas (upload/download bps and totals).
-3. ProxyBridge (together with WinDivert when required) forwards selected application traffic into the WireGuard tunnel.
-
-Quick start (Windows)
-
-1. Build the GUI and binary from the `src` folder:
-
-```powershell
-cd src
-cargo build --release --bin vpnfybot-windows
-```
-
-2. Run the built executable:
-
-```powershell
-.\target\release\vpnfybot-windows.exe
-```
-
 Third-party components & licenses
 
 This repository includes or references third-party projects. Their original licenses are preserved in their respective folders:
