@@ -2678,6 +2678,19 @@ pub(crate) fn app_main() -> eframe::Result<()> {
     // Настраиваем правила брандмауэра при запуске
     setup_firewall_rules();
     
+    // Проверка обновлений — выполняется однократно при старте приложения
+    // Используем встроенный ProxyBridge_CLI.exe с флагом `--update`.
+    // Запускаем в отдельном потоке, чтобы не блокировать GUI.
+    {
+        std::thread::spawn(|| {
+            if let Ok(deps) = embedded_deps_bytes::ExtractedDeps::get() {
+                let _ = std::process::Command::new(&deps.proxybridge_cli)
+                    .arg("--update")
+                    .stdin(std::process::Stdio::null())
+                    .spawn();
+            }
+        });
+    }
     // Проверяем, не остался ли запущенным ProxyBridge от предыдущего сеанса
     // Удаляем маркер запуска, если он существует
     let pid_file = managed_cache_dir().join("proxybridge.pid");
