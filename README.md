@@ -1,4 +1,4 @@
-# WireGuard split-tunneling solution powered by WireProxy + ProxyBridge w/ WinDivert
+# WireGuard split-tunneling solution with WireProxy + ProxyBridge w/ WinDivert under the hood 👻
 
 This repository contains language-specific README files. Choose your language:
 
