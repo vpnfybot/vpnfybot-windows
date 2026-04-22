@@ -1,10 +1,42 @@
 use super::*;
 
 const TRAY_CALLBACK_MESSAGE: u32 = WM_APP + 1;
+const WM_COPYGLOBALDATA: u32 = 0x0049;
 static mut ORIGINAL_WNDPROC: WNDPROC = None;
 const TRAY_ICON_ID: u32 = 1;
 static DROP_FILE_PATH: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static MINIMIZE_VIA_MINBUTTON: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "windows")]
+unsafe fn enable_file_drop_for_window(hwnd: HWND) {
+    if hwnd.0 == 0 {
+        return;
+    }
+
+    let _ = DragAcceptFiles(hwnd, BOOL(1));
+    let _ = ChangeWindowMessageFilterEx(hwnd, WM_DROPFILES, MSGFLT_ALLOW, None);
+    let _ = ChangeWindowMessageFilterEx(hwnd, WM_COPYDATA, MSGFLT_ALLOW, None);
+    let _ = ChangeWindowMessageFilterEx(hwnd, WM_COPYGLOBALDATA, MSGFLT_ALLOW, None);
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn enable_file_drop_for_children(hwnd: HWND, _lparam: LPARAM) -> BOOL {
+    enable_file_drop_for_window(hwnd);
+    BOOL(1)
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn enable_file_drop(hwnd: HWND) {
+    let root_hwnd = GetAncestor(hwnd, GA_ROOT);
+    let target_hwnd = if root_hwnd.0 != 0 { root_hwnd } else { hwnd };
+
+    enable_file_drop_for_window(target_hwnd);
+    let _ = EnumChildWindows(
+        target_hwnd,
+        Some(enable_file_drop_for_children),
+        LPARAM(0),
+    );
+}
 
 pub(super) fn open_url(url: &str) {
     let url_w: Vec<u16> = OsStr::new(url).encode_wide().chain(Some(0)).collect();
@@ -95,7 +127,9 @@ impl AppState {
 
         if let Ok(window_handle) = frame.window_handle() {
             if let Ok(RawWindowHandle::Win32(handle)) = window_handle.raw_window_handle() {
-                let hwnd = HWND(handle.hwnd.get());
+                let raw_hwnd = HWND(handle.hwnd.get());
+                let root_hwnd = unsafe { GetAncestor(raw_hwnd, GA_ROOT) };
+                let hwnd = if root_hwnd.0 != 0 { root_hwnd } else { raw_hwnd };
                 let needs_reset = self.tray_window != Some(hwnd);
                 if needs_reset {
                     if self.tray_icon_added {
@@ -114,7 +148,7 @@ impl AppState {
                             subclass_wndproc as *const () as isize,
                         );
                         ORIGINAL_WNDPROC = std::mem::transmute(prev);
-                        let _ = DragAcceptFiles(hwnd, BOOL(1));
+                        enable_file_drop(hwnd);
                     }
                     self.tray_subclassed = true;
                 }
@@ -323,12 +357,25 @@ impl AppState {
         false
     }
 
-    pub(super) fn handle_dropped_files(&mut self, _ctx: &egui::Context) {
-        let maybe_path = DROP_FILE_PATH
-            .get_or_init(|| Mutex::new(None))
-            .lock()
-            .unwrap()
-            .take();
+    pub(super) fn handle_dropped_files(&mut self, ctx: &egui::Context) {
+        let maybe_path = ctx.input(|input| {
+            input.raw.dropped_files.iter().find_map(|file| {
+                let path = file.path.as_ref()?;
+                let extension = path.extension().and_then(|ext| ext.to_str())?;
+                if extension.eq_ignore_ascii_case("conf") {
+                    Some(path.to_string_lossy().to_string())
+                } else {
+                    None
+                }
+            })
+        }).or_else(|| {
+            DROP_FILE_PATH
+                .get_or_init(|| Mutex::new(None))
+                .lock()
+                .unwrap()
+                .take()
+        });
+
         let path = match maybe_path {
             Some(path) => path,
             None => return,
@@ -346,12 +393,6 @@ impl AppState {
         self.conf_path = Some(path.clone());
         self.error_log = None;
         save_conf_path(self.conf_path.as_ref().unwrap());
-        self.status = format!(
-            "Импортирован {}",
-            Path::new(&path)
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("файл")
-        );
+        self.status.clear();
     }
 }

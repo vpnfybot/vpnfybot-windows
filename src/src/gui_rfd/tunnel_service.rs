@@ -3,6 +3,8 @@ use super::*;
 const PROCESS_LIST_CACHE_TTL: Duration = Duration::from_secs(5);
 const PROCESS_EXIT_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 const PROCESS_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const ELEVATED_HELPER_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
+const WIREPROXY_START_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
 
 static PROCESS_LIST_CACHE: OnceLock<Mutex<Option<ProcessListCache>>> = OnceLock::new();
 static PROCESS_LIST_REFRESH_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -360,6 +362,22 @@ fn read_log_tail(path: &Path, max_bytes: usize) -> Option<String> {
     Some(tail)
 }
 
+fn wait_for_wireproxy_start(info_addr: &str, timeout: Duration) -> Result<(), String> {
+    let started = Instant::now();
+
+    loop {
+        if fetch_wireproxy_metrics(info_addr).is_some() {
+            return Ok(());
+        }
+
+        if started.elapsed() >= timeout {
+            return Err("Wireproxy не запустился в отведённое время".to_string());
+        }
+
+        thread::sleep(Duration::from_millis(200));
+    }
+}
+
 pub(super) fn create_and_start_service(conf: &str) -> ServiceResult {
     let config_content = match fs::read_to_string(conf) {
         Ok(content) => content,
@@ -433,6 +451,44 @@ pub(super) fn create_and_start_service(conf: &str) -> ServiceResult {
         }
     };
 
+    if !super::is_elevated() {
+        let launch_result = super::app_runtime::launch_self_elevated(&[
+            OsString::from("/service"),
+            runtime_config_path.as_os_str().to_os_string(),
+            OsString::from(&wireproxy_info_addr),
+        ]);
+
+        if let Err(e) = launch_result {
+            return ServiceResult {
+                message: e.clone(),
+                active: false,
+                error_log: Some(e),
+                wireproxy_info_addr: None,
+            };
+        }
+
+        if let Err(e) = wait_for_wireproxy_start(&wireproxy_info_addr, WIREPROXY_START_WAIT_TIMEOUT) {
+            return ServiceResult {
+                message: e.clone(),
+                active: false,
+                error_log: Some(e),
+                wireproxy_info_addr: None,
+            };
+        }
+
+        save_config_to_cache(conf);
+
+        return ServiceResult {
+            message: format!("Wireproxy запущен для конфига {}", Path::new(conf)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("tunnel")),
+            active: true,
+            error_log: None,
+            wireproxy_info_addr: Some(wireproxy_info_addr),
+        };
+    }
+
     let mut wire_cmd = std::process::Command::new(&wireproxy_exe);
     wire_cmd.arg("-c")
         .arg(runtime_config_path.to_str().unwrap())
@@ -447,7 +503,18 @@ pub(super) fn create_and_start_service(conf: &str) -> ServiceResult {
     }
 
     match wire_cmd.spawn() {
-        Ok(_child) => {
+        Ok(mut child) => {
+            if let Err(e) = wait_for_wireproxy_start(&wireproxy_info_addr, WIREPROXY_START_WAIT_TIMEOUT) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return ServiceResult {
+                    message: e.clone(),
+                    active: false,
+                    error_log: Some(e),
+                    wireproxy_info_addr: None,
+                };
+            }
+
             save_config_to_cache(conf);
 
             ServiceResult {
@@ -475,7 +542,7 @@ pub(super) fn stop_and_delete_service(conf: &str) -> ServiceResult {
     let config_path = Path::new(conf).canonicalize().ok().map(|p| p.to_string_lossy().to_string());
     let temp_config_path = super::managed_cache_dir().join("vpnfy_wireproxy_temp.conf").to_string_lossy().to_string();
 
-    let mut killed = kill_processes_matching(|process| {
+    let matches_target_process = |process: &sysinfo::Process| {
         if !process_name_matches(process, "wireproxy.exe") {
             return false;
         }
@@ -487,22 +554,50 @@ pub(super) fn stop_and_delete_service(conf: &str) -> ServiceResult {
         });
 
         has_matching_config || config_path.is_none()
-    });
+    };
 
-    if killed {
-        let _ = wait_until_processes_exit(
-            |process| process_name_matches(process, "wireproxy.exe"),
-            PROCESS_EXIT_WAIT_TIMEOUT,
-        );
+    if !super::is_elevated() {
+        let launch_result = super::app_runtime::launch_self_elevated(&[
+            OsString::from("/stop-service"),
+            OsString::from(conf),
+        ]);
+
+        if let Err(e) = launch_result {
+            return ServiceResult {
+                message: e.clone(),
+                active: true,
+                error_log: Some(e),
+                wireproxy_info_addr: None,
+            };
+        }
+
+        if wait_until_processes_exit(matches_target_process, ELEVATED_HELPER_WAIT_TIMEOUT) {
+            return ServiceResult {
+                message: "Wireproxy остановлен".to_string(),
+                active: false,
+                error_log: None,
+                wireproxy_info_addr: None,
+            };
+        }
+
+        return ServiceResult {
+            message: "Не удалось остановить wireproxy через elevated helper".to_string(),
+            active: true,
+            error_log: Some("Не удалось остановить wireproxy через elevated helper".to_string()),
+            wireproxy_info_addr: None,
+        };
     }
 
-    if any_process_matches(|process| process_name_matches(process, "wireproxy.exe")) {
+    let mut killed = kill_processes_matching(matches_target_process);
+
+    if killed {
+        let _ = wait_until_processes_exit(matches_target_process, PROCESS_EXIT_WAIT_TIMEOUT);
+    }
+
+    if any_process_matches(matches_target_process) {
         fallback_taskkill_image("wireproxy.exe");
         killed = true;
-        let _ = wait_until_processes_exit(
-            |process| process_name_matches(process, "wireproxy.exe"),
-            PROCESS_EXIT_WAIT_TIMEOUT,
-        );
+        let _ = wait_until_processes_exit(matches_target_process, PROCESS_EXIT_WAIT_TIMEOUT);
     }
 
     if killed {
@@ -846,24 +941,39 @@ pub(super) fn stop_proxybridge() -> Result<(), String> {
     let cache_dir = super::managed_cache_dir();
 
     let pid_file = cache_dir.join("proxybridge.pid");
-    if !pid_file.exists() {
+    let matches_proxybridge_process = |process: &sysinfo::Process| {
+        process_name_matches(process, "ProxyBridge_CLI.exe")
+    };
+
+    if !pid_file.exists() && !any_process_matches(matches_proxybridge_process) {
         return Err("ProxyBridge не запущен (файл маркера не найден)".to_string());
+    }
+
+    if !super::is_elevated() {
+        let launch_result = super::app_runtime::launch_self_elevated(&[
+            OsString::from("/stop-proxybridge"),
+        ]);
+
+        if let Err(error) = launch_result {
+            return Err(error);
+        }
+
+        if wait_until_processes_exit(matches_proxybridge_process, ELEVATED_HELPER_WAIT_TIMEOUT) {
+            let _ = std::fs::remove_file(&pid_file);
+            return Ok(());
+        }
+
+        return Err("Не удалось остановить все процессы ProxyBridge_CLI.exe".to_string());
     }
 
     let _ = std::fs::remove_file(&pid_file);
 
-    let _ = kill_processes_matching(|process| process_name_matches(process, "ProxyBridge_CLI.exe"));
+    let _ = kill_processes_matching(matches_proxybridge_process);
 
-    if !wait_until_processes_exit(
-        |process| process_name_matches(process, "ProxyBridge_CLI.exe"),
-        PROCESS_EXIT_WAIT_TIMEOUT,
-    ) {
+    if !wait_until_processes_exit(matches_proxybridge_process, PROCESS_EXIT_WAIT_TIMEOUT) {
         fallback_taskkill_image("ProxyBridge_CLI.exe");
 
-        if !wait_until_processes_exit(
-            |process| process_name_matches(process, "ProxyBridge_CLI.exe"),
-            PROCESS_EXIT_WAIT_TIMEOUT,
-        ) {
+        if !wait_until_processes_exit(matches_proxybridge_process, PROCESS_EXIT_WAIT_TIMEOUT) {
             return Err("Не удалось остановить все процессы ProxyBridge_CLI.exe".to_string());
         }
     }
@@ -872,20 +982,14 @@ pub(super) fn stop_proxybridge() -> Result<(), String> {
 }
 
 pub(super) fn kill_existing_processes() {
+    let _ = stop_proxybridge();
+
     let _ = kill_processes_matching(|process| process_name_matches(process, "wireproxy.exe"));
-    let _ = kill_processes_matching(|process| process_name_matches(process, "ProxyBridge_CLI.exe"));
 
     if !wait_until_processes_exit(
         |process| process_name_matches(process, "wireproxy.exe"),
         PROCESS_EXIT_WAIT_TIMEOUT,
     ) {
         fallback_taskkill_image("wireproxy.exe");
-    }
-
-    if !wait_until_processes_exit(
-        |process| process_name_matches(process, "ProxyBridge_CLI.exe"),
-        PROCESS_EXIT_WAIT_TIMEOUT,
-    ) {
-        fallback_taskkill_image("ProxyBridge_CLI.exe");
     }
 }

@@ -55,11 +55,11 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP, NIIF_INFO, SetCurrentProcessExplicitAppUserModelID, ShellExecuteW, Shell_NotifyIconW, NOTIFYICONDATAW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY};
 use windows::Win32::UI::WindowsAndMessaging::{
-    AdjustWindowRectEx, CallWindowProcW, CreateIconIndirect, FindWindowW,
+    AdjustWindowRectEx, CallWindowProcW, ChangeWindowMessageFilterEx, CreateIconIndirect, EnumChildWindows, FindWindowW,
     DestroyIcon, SendMessageW,
-    SetForegroundWindow, SetWindowLongPtrW,
+    GetAncestor, SetForegroundWindow, SetWindowLongPtrW,
     ShowWindow, GWLP_WNDPROC, HICON, ICONINFO, WINDOW_EX_STYLE, WINDOW_STYLE,
-    WM_APP, WM_DROPFILES, WM_LBUTTONUP, WM_RBUTTONUP, WM_SETFONT, WM_SIZE, WNDPROC,
+    GA_ROOT, MSGFLT_ALLOW, WM_APP, WM_COPYDATA, WM_DROPFILES, WM_LBUTTONUP, WM_RBUTTONUP, WM_SETFONT, WM_SIZE, WNDPROC,
     SIZE_MINIMIZED, SW_HIDE, SW_RESTORE, SW_SHOWNORMAL,
 };
 
@@ -201,7 +201,6 @@ struct AppState {
     status_rx: Option<Receiver<ServiceResult>>,
     service_running: bool,
     service_active: bool,
-    elevated: bool,
     session_traffic_bytes: u64,
     session_base_traffic_bytes: Option<u64>,
     connected_at: Option<Instant>,
@@ -242,7 +241,6 @@ struct AppState {
     tray_icon: Option<HICON>,
     traffic_opacity: f32,
     import_button_opacity: f32,
-    import_button_opacity_target: f32,
     connect_animation_start: Option<Instant>,
     disconnect_animation_start: Option<Instant>,
     last_notification: Option<ToastNotification>,

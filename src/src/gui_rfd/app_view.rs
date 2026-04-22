@@ -694,13 +694,6 @@ impl App for AppState {
         };
         let button_font = button_font_id();
         let mut is_animating = false;
-        let opacity_delta = self.import_button_opacity_target - self.import_button_opacity;
-        if opacity_delta.abs() > 0.001 {
-            let factor = if opacity_delta > 0.0 { 0.15 } else { 0.50 };
-            self.import_button_opacity += opacity_delta * factor;
-            self.import_button_opacity = self.import_button_opacity.clamp(0.0, 1.0);
-            is_animating = true;
-        }
         if connect_effect_progress > 0.0 && connect_effect_progress < 1.0 {
             is_animating = true;
         }
@@ -1231,40 +1224,20 @@ impl App for AppState {
                     if connect_interactive && connect_response.clicked() {
                         if let Some(ref conf) = self.conf_path {
                             if self.service_active {
-                                if !self.elevated {
-                                    self.status = self
-                                        .language
-                                        .translate(
-                                            "Нужны права администратора. Запустите приложение от имени администратора",
-                                        )
-                                        .to_owned();
-                                    show_error_dialog(
-                                        self.language.translate("Ошибка"),
-                                        &self.status,
-                                    );
-                                } else {
-                                    let conf_path = conf.clone();
-                                    let (tx, rx) = mpsc::channel();
-                                    self.status_rx = Some(rx);
-                                    self.service_running = true;
-                                    self.error_log = None;
-                                    self.disconnect_animation_start = Some(Instant::now());
+                                let conf_path = conf.clone();
+                                let (tx, rx) = mpsc::channel();
+                                self.status_rx = Some(rx);
+                                self.service_running = true;
+                                self.error_log = None;
+                                self.import_button_opacity = 1.0;
+                                self.disconnect_animation_start = Some(Instant::now());
 
-                                    thread::spawn(move || {
-                                        let result = stop_and_delete_service(&conf_path);
-                                        let _ = tx.send(result);
-                                    });
-                                }
-                            } else if !self.elevated {
-                                self.status = self
-                                    .language
-                                    .translate(
-                                        "Нужны права администратора. Запустите приложение от имени администратора",
-                                    )
-                                    .to_owned();
-                                show_error_dialog(self.language.translate("Ошибка"), &self.status);
+                                thread::spawn(move || {
+                                    let result = stop_and_delete_service(&conf_path);
+                                    let _ = tx.send(result);
+                                });
                             } else {
-                                self.import_button_opacity_target = 0.0;
+                                self.import_button_opacity = 0.0;
                                 self.connect_animation_start = Some(Instant::now());
                                 let conf = conf.clone();
                                 let (tx, rx) = mpsc::channel();
@@ -1642,6 +1615,7 @@ impl App for AppState {
                             self.wireproxy_info_addr =
                                 service_result.wireproxy_info_addr.clone();
                             if self.service_active {
+                                self.import_button_opacity = 0.0;
                                 self.start_tunnel_traffic_worker();
                                 if !was_active {
                                     self.connected_at = Some(Instant::now());
@@ -1718,7 +1692,7 @@ impl App for AppState {
                             } else {
                                 self.connected_at = None;
                                 self.reset_tunnel_traffic_state();
-                                self.import_button_opacity_target = 1.0;
+                                self.import_button_opacity = 1.0;
                                 self.connect_animation_start = None;
 
                                 let had_error = self.error_log.is_some();

@@ -2,6 +2,7 @@
 
 use std::error::Error;
 use std::fs;
+use std::io;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
@@ -74,6 +75,16 @@ fn embedded_dep_matches(path: &PathBuf, expected_size: usize) -> bool {
     }
 }
 
+fn extracted_deps_match(extracted: &ExtractedDeps) -> bool {
+    let deps = EmbeddedDeps::get();
+
+    embedded_dep_matches(&extracted.proxybridge_cli, deps.proxybridge_cli.original_size)
+        && embedded_dep_matches(&extracted.proxybridge_core, deps.proxybridge_core.original_size)
+        && embedded_dep_matches(&extracted.wireproxy, deps.wireproxy.original_size)
+        && embedded_dep_matches(&extracted.windivert, deps.windivert.original_size)
+        && embedded_dep_matches(&extracted.windivert_sys, deps.windivert_sys.original_size)
+}
+
 /// Извлечь встроенную зависимость в управляемую директорию приложения
 pub fn extract_embedded_dep(dep: &EmbeddedDep) -> Result<PathBuf, Box<dyn Error>> {
     let dir = embedded_deps_dir();
@@ -127,18 +138,36 @@ impl ExtractedDeps {
     /// Получить пути к зависимостям, извлекая их при необходимости
     pub fn get() -> Result<Self, Box<dyn Error>> {
         let cache = EXTRACTED_DEPS_CACHE.get_or_init(|| Mutex::new(None));
-        if let Ok(guard) = cache.lock() {
-            if let Some(existing) = guard.as_ref() {
+
+        let mut guard = cache.lock().map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                "embedded dependency cache lock poisoned",
+            )
+        })?;
+
+        if let Some(existing) = guard.as_ref() {
+            if extracted_deps_match(existing) {
                 return Ok(existing.clone());
             }
+
+            eprintln!(
+                "⚠ Кэш встроенных зависимостей устарел или неполон, выполняется повторное извлечение"
+            );
+            *guard = None;
         }
 
         let extracted = extract_all_dependencies()?;
 
-        if let Ok(mut guard) = cache.lock() {
-            *guard = Some(extracted.clone());
+        if !extracted_deps_match(&extracted) {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "not all embedded dependencies were extracted successfully",
+            )
+            .into());
         }
 
+        *guard = Some(extracted.clone());
         Ok(extracted)
     }
 }

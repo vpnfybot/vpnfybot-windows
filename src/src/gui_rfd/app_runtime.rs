@@ -16,7 +16,6 @@ impl Default for AppState {
             status_rx: None,
             service_running: false,
             service_active: false,
-            elevated: is_elevated(),
             session_traffic_bytes: 0,
             session_base_traffic_bytes: None,
             connected_at: None,
@@ -52,7 +51,6 @@ impl Default for AppState {
             tray_icon: None,
             traffic_opacity: 0.0,
             import_button_opacity: 1.0,
-            import_button_opacity_target: 1.0,
             connect_animation_start: None,
             disconnect_animation_start: None,
             last_notification: None,
@@ -278,7 +276,6 @@ impl AppState {
         self.startup_animation_frame = 0;
         self.traffic_opacity = 0.0;
         self.import_button_opacity = 1.0;
-        self.import_button_opacity_target = 1.0;
         self.connect_animation_start = None;
         self.disconnect_animation_start = None;
         self.gif_pulse_start = None;
@@ -294,23 +291,75 @@ impl AppState {
     }
 }
 
-fn relaunch_as_admin() -> bool {
+fn quote_windows_argument(argument: &OsStr) -> String {
+    let value = argument.to_string_lossy();
+    if !value.contains([' ', '\t', '\n', '"']) {
+        return value.into_owned();
+    }
+
+    let mut escaped = String::from("\"");
+    let mut backslash_count = 0usize;
+
+    for ch in value.chars() {
+        match ch {
+            '\\' => backslash_count += 1,
+            '"' => {
+                escaped.push_str(&"\\".repeat(backslash_count * 2 + 1));
+                escaped.push('"');
+                backslash_count = 0;
+            }
+            _ => {
+                escaped.push_str(&"\\".repeat(backslash_count));
+                escaped.push(ch);
+                backslash_count = 0;
+            }
+        }
+    }
+
+    escaped.push_str(&"\\".repeat(backslash_count * 2));
+    escaped.push('"');
+    escaped
+}
+
+pub(crate) fn launch_self_elevated(arguments: &[OsString]) -> Result<(), String> {
     let exe = match env::current_exe() {
         Ok(path) => path,
-        Err(_) => return false,
+        Err(e) => return Err(format!("Не удалось определить путь к приложению: {}", e)),
     };
+
     let exe_w: Vec<u16> = exe.as_os_str().encode_wide().chain(Some(0)).collect();
+    let parameters = arguments
+        .iter()
+        .map(|argument| quote_windows_argument(argument.as_os_str()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let params_w: Vec<u16> = OsStr::new(&parameters)
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
     let result = unsafe {
         ShellExecuteW(
             None,
             w!("runas"),
             PCWSTR(exe_w.as_ptr()),
+            if parameters.is_empty() {
+                PCWSTR::null()
+            } else {
+                PCWSTR(params_w.as_ptr())
+            },
             PCWSTR::null(),
-            PCWSTR::null(),
-            SW_SHOWNORMAL,
+            SW_HIDE,
         )
     };
-    (result.0 as isize) > 32
+
+    if (result.0 as isize) > 32 {
+        Ok(())
+    } else {
+        Err(format!(
+            "Не удалось запустить elevated helper (ShellExecuteW code {})",
+            result.0 as isize
+        ))
+    }
 }
 
 fn check_single_instance() -> bool {
@@ -328,6 +377,10 @@ fn check_single_instance() -> bool {
 }
 
 fn setup_firewall_rules() {
+    if !is_elevated() {
+        return;
+    }
+
     thread::spawn(|| {
         if let Ok(deps) = embedded_deps_bytes::ExtractedDeps::get() {
             let wireproxy_path = deps.wireproxy.to_string_lossy().to_string();
@@ -430,19 +483,20 @@ fn configure_process_notification_identity() {
 }
 
 pub(crate) fn app_main() -> eframe::Result<()> {
+    let args: Vec<OsString> = env::args_os().collect();
+    if args.len() >= 2 && args[1] == OsStr::new("/stop-proxybridge") {
+        run_stop_proxybridge_mode();
+    }
+    if args.len() >= 3 && args[1] == OsStr::new("/service") {
+        let info_addr = args.get(3).map(|value| value.as_os_str());
+        run_wireproxy_mode(&args[2], info_addr);
+    }
+    if args.len() >= 3 && args[1] == OsStr::new("/stop-service") {
+        run_stop_wireproxy_mode(&args[2]);
+    }
+
     if !check_single_instance() {
         std::process::exit(0);
-    }
-
-    let args: Vec<OsString> = env::args_os().collect();
-    if args.len() >= 3 && args[1] == OsStr::new("/service") {
-        run_wireproxy_mode(&args[2]);
-    }
-
-    if !is_elevated() {
-        if relaunch_as_admin() {
-            std::process::exit(0);
-        }
     }
 
     match app_dirs::AppDirs::init() {
@@ -506,7 +560,7 @@ pub(crate) fn app_main() -> eframe::Result<()> {
     )
 }
 
-fn run_wireproxy_mode(conf: &OsStr) -> ! {
+fn run_wireproxy_mode(conf: &OsStr, info_addr: Option<&OsStr>) -> ! {
     let conf_path = conf.to_string_lossy();
 
     let deps = match embedded_deps_bytes::ExtractedDeps::get() {
@@ -517,11 +571,25 @@ fn run_wireproxy_mode(conf: &OsStr) -> ! {
         }
     };
 
-    match std::process::Command::new(&deps.wireproxy)
+    let mut command = std::process::Command::new(&deps.wireproxy);
+    command
         .arg("-c")
         .arg(conf_path.as_ref())
-        .spawn()
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    if let Some(info_addr) = info_addr {
+        command.arg("--info").arg(info_addr.to_string_lossy().as_ref());
+    }
+
+    #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    match command.spawn() {
         Ok(mut child) => {
             let exit_status = child
                 .wait()
@@ -534,6 +602,27 @@ fn run_wireproxy_mode(conf: &OsStr) -> ! {
         }
         Err(e) => {
             eprintln!("Ошибка запуска wireproxy.exe: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run_stop_wireproxy_mode(conf: &OsStr) -> ! {
+    let result = stop_and_delete_service(conf.to_string_lossy().as_ref());
+    if let Some(error_log) = result.error_log {
+        eprintln!("{}", error_log);
+        std::process::exit(1);
+    }
+
+    eprintln!("{}", result.message);
+    std::process::exit(0);
+}
+
+fn run_stop_proxybridge_mode() -> ! {
+    match stop_proxybridge() {
+        Ok(_) => std::process::exit(0),
+        Err(error) => {
+            eprintln!("{}", error);
             std::process::exit(1);
         }
     }
