@@ -165,6 +165,7 @@ impl Language {
                 "Поиск" => "Search",
                 "Доступна новая версия: v{}" => "New version available: v{}",
                 "Доступна новая версия" => "New version available",
+                "Загрузка" => "Downloading",
                 "Проверка обновлений..." => "Checking for updates...",
                 "Проверка обновлений" => "Checking for updates",
                 "Установить" => "Install",
@@ -393,27 +394,50 @@ impl App for AppState {
                     let max_content_w = (available.width() - 40.0).max(320.0);
                     let content_w = (available.width() * 0.7).clamp(320.0, max_content_w);
                     let content_h = 260.0_f32;
-                    // Shift modal contents down by 20px
+                    // Shift modal contents down by 20px (overall adjustment)
                     let content_rect = egui::Rect::from_center_size(available.center() + egui::vec2(0.0, 20.0), egui::vec2(content_w, content_h));
                     // No panel background: rely on semi-opaque overlay; draw only controls and text above it.
                     let mut content_ui = ui.child_ui(content_rect, egui::Layout::top_down(egui::Align::Center));
-                    content_ui.add_space(8.0);
-                    content_ui.vertical_centered(|ui| {
-                        ui.heading(egui::RichText::new(self.language.translate("Доступна новая версия")).color(egui::Color32::WHITE));
-                    });
-                    content_ui.add_space(12.0);
+                    // shift all modal elements further down by 24px (increase top spacing)
+                    content_ui.add_space(80.0);
 
-                    // Progress bar — visible only while actively downloading
+                    // Progress area: show a single text object that either appears inside
+                    // the progress bar (when not downloading) or above it (when downloading).
+                    // Ensure the text uses the same font size in both states and the bar
+                    // width matches the Install button width.
                     let downloading = update_check::UPDATE_DOWNLOADING.get().map(|a| a.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(false);
                     let progress_percent = update_check::UPDATE_DOWNLOAD_PROGRESS.get().map(|p| p.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(0usize);
-                    if downloading {
-                        let progress_ratio = (progress_percent as f32 / 100.0).clamp(0.0, 1.0);
 
-                        let bar_width = content_rect.width() - 80.0;
-                        let bar_size = egui::vec2(bar_width.max(120.0), 18.0);
-                        let (bar_rect, _) = content_ui.allocate_exact_size(bar_size, egui::Sense::hover());
+                    // Make bar width equal to Install button width
+                    let button_width = 220.0f32;
+                    let bar_size = egui::vec2(button_width, 18.0);
+
+                    // Single label text for both states
+                    let label_text = if downloading {
+                        self.language.translate("Загрузка")
+                    } else {
+                        self.language.translate("Доступна новая версия")
+                    };
+
+                    // Allocate the bar area once so layout and buttons stay stable
+                    let (bar_rect, _) = content_ui.allocate_exact_size(bar_size, egui::Sense::hover());
+
+                    if downloading {
+                        // Draw the bar background only while downloading
                         let bar_bg = egui::Color32::from_rgba_unmultiplied(255, 255, 255, (0.20_f32 * 255.0_f32).round() as u8);
                         content_ui.painter().rect_filled(bar_rect, 9.0, bar_bg);
+
+                        // Draw the label above the bar (8px gap) without changing layout
+                        let label_pos = egui::pos2(bar_rect.center().x, bar_rect.min.y - 8.0);
+                        content_ui.painter().text(
+                            label_pos,
+                            egui::Align2::CENTER_BOTTOM,
+                            label_text,
+                            egui::FontId::proportional(UI_BUTTON_FONT_SIZE),
+                            egui::Color32::WHITE,
+                        );
+
+                        let progress_ratio = (progress_percent as f32 / 100.0).clamp(0.0, 1.0);
                         let fill_w = bar_rect.width() * progress_ratio;
                         if fill_w > 0.0 {
                             let fill_rect = egui::Rect::from_min_max(bar_rect.min, egui::pos2(bar_rect.min.x + fill_w, bar_rect.max.y));
@@ -426,6 +450,15 @@ impl App for AppState {
                             format!("{}%", progress_percent),
                             egui::FontId::proportional(14.0),
                             egui::Color32::BLACK,
+                        );
+                    } else {
+                        // Not downloading: do not draw bar background — keep area reserved and show label inside
+                        content_ui.painter().text(
+                            bar_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            label_text,
+                            egui::FontId::proportional(UI_BUTTON_FONT_SIZE),
+                            egui::Color32::WHITE,
                         );
                     }
 
@@ -487,9 +520,35 @@ impl App for AppState {
                                 let agent = "vpnfybot-windows-update-install";
                                 if let Ok(resp) = ureq::get(&dl_url).set("User-Agent", agent).call() {
                                     let total_opt = resp.header("Content-Length").and_then(|s| s.parse::<usize>().ok());
+                                    // Directory where current exe lives (fallbacks to CWD or temp)
                                     let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|pp| pp.to_path_buf())).unwrap_or_else(|| std::env::current_dir().unwrap_or(std::env::temp_dir()));
-                                    let safe_name = std::path::Path::new(&fname).file_name().and_then(|n| n.to_str()).unwrap_or("update_installer.exe").to_string();
-                                    if let Ok(mut file) = std::fs::File::create(exe_dir.join(&safe_name)) {
+
+                                    // Determine whether the downloaded asset looks like our app (replace candidate)
+                                    let asset_stem = std::path::Path::new(&fname).file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_lowercase();
+                                    let cur_no_ext_opt = std::env::current_exe().ok().and_then(|p| p.file_name().and_then(|n| n.to_str()).map(|s| s.trim_end_matches(".exe").to_string().to_lowercase()));
+                                    let replace_candidate = match &cur_no_ext_opt {
+                                        Some(cur_no_ext) => {
+                                            asset_stem == *cur_no_ext || asset_stem.contains("vpnfy") || cur_no_ext.contains(&asset_stem) || asset_stem.contains(cur_no_ext)
+                                        }
+                                        None => asset_stem.contains("vpnfy"),
+                                    };
+
+                                    // Choose download filename/location. If this is a replacement candidate,
+                                    // download into the system temp dir with the final base name `vpnfybot-windows.exe`
+                                    // so that after replacement the installed file has that canonical name.
+                                    let downloaded_basename = if replace_candidate {
+                                        "vpnfybot-windows.exe".to_string()
+                                    } else {
+                                        std::path::Path::new(&fname).file_name().and_then(|n| n.to_str()).unwrap_or("update_installer.exe").to_string()
+                                    };
+
+                                    let download_path = if replace_candidate {
+                                        std::env::temp_dir().join(&downloaded_basename)
+                                    } else {
+                                        exe_dir.join(&downloaded_basename)
+                                    };
+
+                                    if let Ok(mut file) = std::fs::File::create(&download_path) {
                                         let mut reader = resp.into_reader();
                                         let mut buf = [0u8; 8192];
                                         let mut downloaded: usize = 0;
@@ -512,10 +571,11 @@ impl App for AppState {
                                             }
                                         }
                                         progress_atomic.store(100, std::sync::atomic::Ordering::Relaxed);
+
                                         #[cfg(target_os = "windows")]
                                         {
                                             // Decide whether to replace current exe or just run the downloaded file.
-                                            let downloaded_path = exe_dir.join(&safe_name);
+                                            let downloaded_path = download_path.clone();
                                             if let Ok(current_exe) = std::env::current_exe() {
                                                 let current_name = current_exe
                                                     .file_name()
@@ -523,19 +583,18 @@ impl App for AppState {
                                                     .unwrap_or_default()
                                                     .to_lowercase();
                                                 let cur_no_ext = current_name.trim_end_matches(".exe").to_string();
-                                                let fname_no_ext = std::path::Path::new(&safe_name)
+                                                let fname_no_ext = std::path::Path::new(&downloaded_basename)
                                                     .file_stem()
                                                     .and_then(|s| s.to_str())
                                                     .unwrap_or_default()
                                                     .to_lowercase();
 
-                                                // If the downloaded file looks like our app (same base name or contains 'vpnfy'), perform an in-place replace.
-                                                let replace_candidate = fname_no_ext == cur_no_ext
+                                                let replace_candidate_after = fname_no_ext == cur_no_ext
                                                     || fname_no_ext.contains("vpnfy")
                                                     || cur_no_ext.contains(&fname_no_ext)
                                                     || fname_no_ext.contains(&cur_no_ext);
 
-                                                if replace_candidate {
+                                                if replace_candidate_after {
                                                     // Create a small PowerShell script that waits for this process to exit, moves the downloaded exe into place, and launches it.
                                                     let script_name = format!("vpnfy_update_{}.ps1", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0u128));
                                                     let script_path = std::env::temp_dir().join(&script_name);
@@ -543,35 +602,35 @@ impl App for AppState {
                                                     let dst = current_exe.display().to_string().replace("'", "''");
                                                     let procname = cur_no_ext.replace("'", "''");
                                                     let script = format!(
-r#"$src = '{src}'
-$dst = '{dst}'
-$proc = '{proc}'
-Start-Sleep -Milliseconds 500
-$tries = 0
-while (Get-Process -Name $proc -ErrorAction SilentlyContinue) {{
-    Start-Sleep -Seconds 1
-    $tries += 1
-    if ($tries -gt 120) {{ exit 1 }}
-}}
-$success = $false
-$tries = 0
-while (-not $success -and $tries -lt 120) {{
-    try {{
-        Move-Item -Path $src -Destination $dst -Force -ErrorAction Stop
-        $success = $true
-    }} catch {{
-        Start-Sleep -Milliseconds 2500
+    r#"$src = '{src}'
+    $dst = '{dst}'
+    $proc = '{proc}'
+    Start-Sleep -Milliseconds 500
+    $tries = 0
+    while (Get-Process -Name $proc -ErrorAction SilentlyContinue) {{
+        Start-Sleep -Seconds 1
         $tries += 1
+        if ($tries -gt 120) {{ exit 1 }}
     }}
-}}
-if ($success) {{
-    Start-Process -FilePath $dst
-    Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
-    exit 0
-}} else {{
-    exit 1
-}}
-"#, src=src, dst=dst, proc=procname);
+    $success = $false
+    $tries = 0
+    while (-not $success -and $tries -lt 120) {{
+        try {{
+            Move-Item -Path $src -Destination $dst -Force -ErrorAction Stop
+            $success = $true
+        }} catch {{
+            Start-Sleep -Milliseconds 2500
+            $tries += 1
+        }}
+    }}
+    if ($success) {{
+        Start-Process -FilePath $dst
+        Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
+        exit 0
+    }} else {{
+        exit 1
+    }}
+    "#, src=src, dst=dst, proc=procname);
 
                                                     let _ = std::fs::write(&script_path, script.as_bytes());
 
@@ -595,7 +654,7 @@ if ($success) {{
                                                 }
                                             } else {
                                                 // Couldn't determine current exe — fallback to launching downloaded file.
-                                                let _ = std::process::Command::new(exe_dir.join(&safe_name)).spawn();
+                                                let _ = std::process::Command::new(download_path).spawn();
                                                 std::process::exit(0);
                                             }
                                         }

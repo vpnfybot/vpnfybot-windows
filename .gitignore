@@ -1,0 +1,3 @@
+# Ignore Rust/Cargo debug build folder(s)
+/target/debug/
+/src/target/debug/
