@@ -1,5 +1,5 @@
-# WireGuard Split-Tunneling Solution  
-### Powered by WireProxy + ProxyBridge + WinDivert 👻
+# WireGuard Split-Tunneling Solution 👻
+### Powered by WireProxy + ProxyBridge + WinDivert
 
 <p align="center">
   <img src="https://github.com/vpnfybot/vpnfybot-windows/blob/main/src/interface.png?raw=true" width="320" height="410">
@@ -77,12 +77,6 @@ This tool fills that gap with a flexible and user-friendly solution.
 
 ---
 
-## 📄 License
-
-This project is licensed under the MIT License.
-
----
-
 <p align="center">
-  Made with ❤️ from t.me/vpnfybot
+  Made with ❤️ from <a href="https://t.me/vpnfybot">@vpnfybot</a>
 </p>
