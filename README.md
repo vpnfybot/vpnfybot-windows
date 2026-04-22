@@ -84,5 +84,5 @@ This project is licensed under the MIT License.
 ---
 
 <p align="center">
-  Made with ❤️ from t.me/vpnfybot
+  Made with ❤️ from <a href="https://t.me/vpnfybot">@vpnfybot</a>
 </p>
