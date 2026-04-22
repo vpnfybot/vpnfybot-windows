@@ -4,7 +4,7 @@
 use std::error::Error;
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Структура для управления всеми директориями приложения
 #[derive(Debug, Clone)]
@@ -85,44 +85,76 @@ impl AppDirs {
             fs::write(&info_file, info)?;
             eprintln!("✓ Создана папка приложения: {}", self.root.display());
         }
-        
-        // Создаем файл .gitkeep в каждой папке (чтобы папки были видны в git)
-        for dir in &[
-            &self.logs,
-            &self.permissions,
-            &self.configs,
-            &self.cache,
-        ] {
-            let gitkeep = dir.join(".gitkeep");
-            if !gitkeep.exists() {
-                fs::write(&gitkeep, "")?;
-            }
-        }
-        
-        // Создаем README файлы с описанием
-        self.create_readme(&self.logs, "Логи приложения (wireproxy и ProxyBridge)")?;
-        self.create_readme(&self.permissions, "Файлы разрешений брандмауэра")?;
-        self.create_readme(&self.configs, "Конфиги WireGuard и приложения")?;
-        self.create_readme(&self.cache, "Кэш и временные данные")?;
-        
+
         Ok(())
     }
-    
-    /// Создать README файл в директории
-    fn create_readme(&self, dir: &Path, description: &str) -> Result<(), Box<dyn Error>> {
-        let readme = dir.join("README.txt");
-        if !readme.exists() {
-            let content = format!(
-                "# {}\n\n\
-                 {}\n\n\
-                 Эта папка управляется приложением @vpnfybot-windows.\n\
-                 Не удаляйте файлы вручную, если приложение работает.\n",
-                dir.file_name().unwrap_or_default().to_string_lossy(),
-                description
-            );
-            fs::write(&readme, content)?;
+
+    /// Полностью сбросить временные runtime-файлы при старте приложения.
+    /// Конфиги пользователя не затрагиваются.
+    pub fn reset_runtime_state(&self) -> Result<(), Box<dyn Error>> {
+        for dir in [&self.logs, &self.permissions, &self.cache, &self.deps] {
+            if dir.exists() {
+                fs::remove_dir_all(dir)?;
+            }
+            fs::create_dir_all(dir)?;
+        }
+
+        self.remove_legacy_readmes()?;
+        self.create_fresh_runtime_files()?;
+        let deleted_global = self.cleanup_global_temp_artifacts()?;
+
+        eprintln!("✓ Runtime-временные файлы очищены и пересозданы");
+        if deleted_global > 0 {
+            eprintln!("✓ Удалено временных файлов обновления из системного temp: {}", deleted_global);
+        }
+
+        Ok(())
+    }
+
+    fn remove_legacy_readmes(&self) -> Result<(), Box<dyn Error>> {
+        for dir in [&self.logs, &self.permissions, &self.configs, &self.cache, &self.deps] {
+            let readme = dir.join("README.txt");
+            if readme.exists() {
+                fs::remove_file(readme)?;
+            }
         }
         Ok(())
+    }
+
+    fn create_fresh_runtime_files(&self) -> Result<(), Box<dyn Error>> {
+        for log_name in ["proxybridge.log", "update_check.log"] {
+            fs::write(self.logs.join(log_name), "")?;
+        }
+        Ok(())
+    }
+
+    fn cleanup_global_temp_artifacts(&self) -> Result<u32, Box<dyn Error>> {
+        let mut deleted_count = 0;
+        let temp_dir = env::temp_dir();
+
+        if let Ok(entries) = fs::read_dir(temp_dir) {
+            for entry in entries {
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(_) => continue,
+                };
+
+                let path = entry.path();
+                let file_name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+                let is_update_script = file_name.starts_with("vpnfy_update_") && file_name.ends_with(".ps1");
+                let is_downloaded_update = file_name == "vpnfybot-windows.exe";
+
+                if !(is_update_script || is_downloaded_update) {
+                    continue;
+                }
+
+                if path.is_file() && fs::remove_file(&path).is_ok() {
+                    deleted_count += 1;
+                }
+            }
+        }
+
+        Ok(deleted_count)
     }
     
     /// Получить путь к файлу лога
@@ -141,34 +173,6 @@ impl AppDirs {
         self.permissions.join(format!("{}_permissions.txt", app_name))
     }
     
-    /// Очистить старые логи (старше N дней)
-    pub fn cleanup_old_logs(&self, days: u64) -> Result<u32, Box<dyn Error>> {
-        let mut deleted_count = 0;
-        
-        if let Ok(entries) = fs::read_dir(&self.logs) {
-            let now = std::time::SystemTime::now();
-            let cutoff = now - std::time::Duration::from_secs(days * 86400);
-            
-            for entry in entries {
-                if let Ok(entry) = entry {
-                    if let Ok(metadata) = entry.metadata() {
-                        if let Ok(modified) = metadata.modified() {
-                            if modified < cutoff {
-                                let _ = fs::remove_file(entry.path());
-                                deleted_count += 1;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        if deleted_count > 0 {
-            eprintln!("✓ Удалено старых логов: {}", deleted_count);
-        }
-        
-        Ok(deleted_count)
-    }
 }
 
 /// Получить корневую папку приложения
