@@ -24,4 +24,4 @@ src\icons/language.svg:
 src\icons/arrow-up.svg:
 src\icons/arrow-down.svg:
 
-# env-dep:CARGO_PKG_VERSION=3.2.3
+# env-dep:CARGO_PKG_VERSION=3.2.4

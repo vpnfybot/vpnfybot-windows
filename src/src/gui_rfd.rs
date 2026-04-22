@@ -36,6 +36,7 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc::{self, Receiver}, Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 use winrt_notification::Toast;
@@ -61,6 +62,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_APP, WM_DROPFILES, WM_LBUTTONUP, WM_RBUTTONUP, WM_SETFONT, WM_SIZE, WNDPROC,
     SIZE_MINIMIZED, SW_HIDE, SW_RESTORE, SW_SHOWNORMAL,
 };
+
+use windows::Win32::UI::WindowsAndMessaging::{WM_NCLBUTTONDOWN, HTMINBUTTON};
 
 #[path = "embedded_deps_bytes.rs"]
 mod embedded_deps_bytes;
@@ -2305,6 +2308,7 @@ const TRAY_CALLBACK_MESSAGE: u32 = WM_APP + 1;
 static mut ORIGINAL_WNDPROC: WNDPROC = None;
 const TRAY_ICON_ID: u32 = 1;
 static DROP_FILE_PATH: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+static MINIMIZE_VIA_MINBUTTON: AtomicBool = AtomicBool::new(false);
 
 fn open_url(url: &str) {
     let url_w: Vec<u16> = OsStr::new(url).encode_wide().chain(Some(0)).collect();
@@ -2330,9 +2334,21 @@ fn show_error_dialog(title: &str, message: &str) {
 
 unsafe extern "system" fn subclass_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
+        WM_NCLBUTTONDOWN => {
+            // User clicked non-client area; check if it was the minimize button
+            if (wparam.0 as u32) == HTMINBUTTON {
+                MINIMIZE_VIA_MINBUTTON.store(true, Ordering::SeqCst);
+            }
+        }
         WM_SIZE => {
             if wparam.0 as u32 == SIZE_MINIMIZED {
-                let _ = ShowWindow(hwnd, SW_HIDE);
+                // Only hide the window (minimize to tray) when the minimize button
+                // was explicitly clicked. If minimized via taskbar click or other
+                // means, leave it minimized in the taskbar.
+                let via_min_button = MINIMIZE_VIA_MINBUTTON.swap(false, Ordering::SeqCst);
+                if via_min_button {
+                    let _ = ShowWindow(hwnd, SW_HIDE);
+                }
             }
         }
         WM_DROPFILES => {
