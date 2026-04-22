@@ -1,19 +1,88 @@
-# WireGuard split-tunneling solution powered by WireProxy + ProxyBridge w/ WinDivert
+# Решение для раздельного туннелирования WireGuard
+### На базе WireProxy + ProxyBridge + WinDivert 👻
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![CI](https://img.shields.io/github/actions/workflow/status/USERNAME/REPO/ci.yml?branch=main)](https://github.com/USERNAME/REPO/actions) [![Latest Release](https://img.shields.io/github/v/release/USERNAME/REPO?label=release)](https://github.com/USERNAME/REPO/releases)
+<p align="center">
+  <img src="https://github.com/vpnfybot/vpnfybot-windows/blob/main/src/interface.png?raw=true" width="320" height="410">
+</p>
 
-Windows-решение для раздельного туннелирования (split-tunneling) через WireGuard, использующее WireProxy, ProxyBridge и WinDivert для маршрутизации трафика по процессам и сайтам.
+<p align="center">
+  <a href="README.md">EN</a>
+</p>
 
-- WireProxy: https://github.com/windtf/wireproxy
-- ProxyBridge: https://github.com/InterceptSuite/ProxyBridge
-- WinDivert: https://github.com/basil00/WinDivert
+<p align="center">
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/License-MIT-yellow.svg">
+  </a>
+</p>
 
-Обзор
+---
 
-Проект предоставляет удобный GUI и вспомогательные бинарники для настройки раздельного туннелирования на Windows. Вы можете направлять трафик конкретных приложений или сайтов через WireGuard, оставляя остальной трафик вне туннеля.
+## 🚀 О проекте
 
-Лицензии третьих сторон
+Лёгкое приложение под Windows, которое реализует полноценное раздельное туннелирование для WireGuard 
+Маршрутизируйте через VPN только выбранные приложения и сайты — либо исключайте их полностью
 
-См. `wireproxy-master/LICENSE`, `proxybridge-master/LICENSE`, `WinDivert-2.2.2-A/LICENSE`.
+В основе приложения следующие проекты:
+- **WireProxy**
+- **ProxyBridge**
+- **WinDivert**
 
-Лицензия проекта: MIT (см. `LICENSE`).
+---
+
+## ✨ Возможности
+
+- 🎯 **Маршрутизация по приложениям**  
+  Выбирайте, какие приложения должны идти через VPN-туннель
+
+- 🌐 **Маршрутизация по сайтам**  
+  Направляйте конкретные домены через VPN
+
+- 🚫 **Правила исключения**  
+  Исключайте приложения или сайты из маршрутизации через VPN
+
+- 🔄 **Автообновления**  
+  Встроенный проверщик версий и схема бесшовного обновления
+
+- 🌍 **Мультиязычность**  
+  Поддерживаются:
+  - 🇺🇸 English
+  - 🇷🇺 Русский
+
+- ⚡ **Простая настройка**  
+  Импортируйте ваш `.conf` файл и подключайтесь (файл `.conf` можно получить бесплатно у <a href="https://t.me/vpnfybot">@vpnfybot</a>)
+
+---
+
+## 📦 Установка
+
+1. Скачайте последний релиз с GitHub
+2. Запустите `.exe` файл
+3. Импортируйте конфигурацию
+4. Готово ✅
+
+---
+
+## ⚠️ Примечания
+
+- Некоторые приложения или сайты могут работать нестабильно из‑за ограничений ОС или сети
+- Для корректной работы могут потребоваться права администратора
+- Для фильтрации пакетов используется WinDivert
+
+---
+
+## 🧠 Зачем это нужно
+
+WireGuard не предоставляет встроенного раздельного туннелирования по приложениям/сайтам в Windows
+Этот инструмент заполняет этот пробел удобным и гибким решением
+
+---
+
+## 📄 Лицензия
+
+Код этого проекта распространяется под лицензией MIT (см. `LICENSE`)
+
+---
+
+<p align="center">
+  Сделано с ❤️ в сообществе <a href="https://t.me/vpnfybot">t.me/vpnfybot</a>
+</p>

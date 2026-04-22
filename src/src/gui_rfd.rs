@@ -66,6 +66,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 mod embedded_deps_bytes;
 #[path = "app_dirs.rs"]
 mod app_dirs;
+#[path = "update_check.rs"]
+mod update_check;
 #[path = "gui_rfd/error_dialog.rs"]
 mod error_dialog;
 #[path = "gui_rfd/process_editor.rs"]
@@ -151,13 +153,19 @@ impl Language {
                 "Исключенные приложения" => "Excluded applications",
                 "Введите сайты, которые должны работать через VPN" => "Enter sites that should work through VPN",
                 "Режим VPN" => "VPN mode",
-                "В режиме \"Вся система\" сайты из списка \"Сайты через VPN\" и выбранные приложения из списка \"Выбранные приложения\" будут исключены из VPN туннеля" => "In the \"Whole system\" mode, sites from the \"VPN sites\" list and selected apps from the \"Selected applications\" list will be excluded from the VPN tunnel",
-                "В режиме \"Выбранные приложения\" сайты из списка \"Сайты через VPN\" и выбранные приложения из списка \"Выбранные приложения\" будут идти через VPN туннель" => "In the \"Selected applications\" mode, sites from the \"VPN sites\" list and selected apps from the \"Selected applications\" list will go through the VPN tunnel",
+                "В режиме \"Вся система\" сайты из списка \"Исключенные сайты\" и приложения из списка \"Исключенные приложения\" будут исключены из VPN туннеля" => "In the \"Whole system\" mode, sites from the \"Excluded sites\" list and apps from the \"Excluded applications\" list will be excluded from the VPN tunnel",
+                "В режиме \"Выбранные приложения\" сайты из списка \"Сайты через VPN\" и приложения из списка \"Приложения через VPN\" будут идти через VPN туннель" => "In the \"Selected applications\" mode, sites from the \"Sites via VPN\" list and apps from the \"Apps via VPN\" list will go through the VPN tunnel",
                 "Сохранить" => "Save",
                 "Закрыть" => "Close",
                 "Сайты" => "Sites",
                 "Экспорт" => "Export",
                 "Поиск" => "Search",
+                "Доступна новая версия: v{}" => "New version available: v{}",
+                "Доступна новая версия" => "New version available",
+                "Проверка обновлений..." => "Checking for updates...",
+                "Проверка обновлений" => "Checking for updates",
+                "Установить" => "Install",
+                "Позже" => "Later",
                 _ => key,
             },
             Language::Ru => key,
@@ -215,6 +223,7 @@ struct AppState {
     connect_animation_start: Option<Instant>,
     disconnect_animation_start: Option<Instant>,
     last_notification: Option<ToastNotification>,
+    update_pending: Option<update_check::UpdateAvailable>,
     proxybridge_running: bool,
     selected_processes: Vec<String>,
     selected_sites: Vec<String>,
@@ -235,8 +244,7 @@ struct AppState {
     button_hfont: Option<HFONT>,
     // Lighter HFONT for non-bold mode text (used for "Вся система")
     button_hfont_light: Option<HFONT>,
-    // HFONT for speed labels rendered without smoothing
-    speed_hfont: Option<HFONT>,
+    // HFONT for speed labels rendered without smoothing (removed - unused)
     
 }
 
@@ -249,7 +257,7 @@ impl Default for AppState {
         let proxy_mode_toggle = load_proxy_mode();
         let language = load_language();
 
-        Self {
+        let s = Self {
             conf_path,
             status,
             error_log: None,
@@ -294,6 +302,7 @@ impl Default for AppState {
             connect_animation_start: None,
             disconnect_animation_start: None,
             last_notification: None,
+            update_pending: None,
             proxybridge_running: false,
             selected_processes,
             selected_sites,
@@ -310,9 +319,11 @@ impl Default for AppState {
             win_text_cache: std::collections::HashMap::new(),
             button_hfont: create_button_ui_font(),
             button_hfont_light: create_button_ui_font_light(),
-            speed_hfont: create_button_ui_font(),
             // connect_button_hwnd удалён
-        }
+        };
+        // Run an update check at startup (background thread)
+        update_check::spawn_update_check_thread();
+        s
     }
 }
 
@@ -345,8 +356,306 @@ impl App for AppState {
                 self.apply_black_window_frame(frame);
             }
         }
-
+        
         // (WinAPI Connect button удалён, egui-кнопки возвращены)
+
+        // If a background update check queued an update, move it into state
+        if self.update_pending.is_none() {
+            if let Some(mutex) = update_check::UPDATE_AVAILABLE.get() {
+                if let Ok(mut guard) = mutex.lock() {
+                    if let Some(info) = guard.take() {
+                        self.update_pending = Some(info);
+                    }
+                }
+            }
+        }
+
+        // If we have a pending update, draw a centered modal with semi-opaque overlay
+        if let Some(info) = &self.update_pending {
+            let info = info.clone();
+            let available = ctx.available_rect();
+            egui::Area::new("update_modal_full".into())
+                .fixed_pos(available.min)
+                .show(ctx, |ui| {
+                    ui.set_min_size(available.size());
+                    // Consume clicks so background UI is not interactive
+                    let _bg_resp = ui.allocate_rect(available, egui::Sense::click());
+
+                    // Overlay: semi-opaque black (80% opacity)
+                    let overlay_alpha = (0.80_f32 * 255.0_f32).round() as u8;
+                    let overlay_color = egui::Color32::from_rgba_unmultiplied(0, 0, 0, overlay_alpha);
+                    ui.painter().rect_filled(available, 0.0, overlay_color);
+
+                    // Centered content panel
+                    let max_content_w = (available.width() - 40.0).max(320.0);
+                    let content_w = (available.width() * 0.7).clamp(320.0, max_content_w);
+                    let content_h = 260.0_f32;
+                    // Shift modal contents down by 20px
+                    let content_rect = egui::Rect::from_center_size(available.center() + egui::vec2(0.0, 20.0), egui::vec2(content_w, content_h));
+                    // No panel background: rely on semi-opaque overlay; draw only controls and text above it.
+                    let mut content_ui = ui.child_ui(content_rect, egui::Layout::top_down(egui::Align::Center));
+                    content_ui.add_space(8.0);
+                    content_ui.vertical_centered(|ui| {
+                        ui.heading(egui::RichText::new(self.language.translate("Доступна новая версия")).color(egui::Color32::WHITE));
+                    });
+                    content_ui.add_space(12.0);
+
+                    // Progress bar — visible only while actively downloading
+                    let downloading = update_check::UPDATE_DOWNLOADING.get().map(|a| a.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(false);
+                    let progress_percent = update_check::UPDATE_DOWNLOAD_PROGRESS.get().map(|p| p.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(0usize);
+                    if downloading {
+                        let progress_ratio = (progress_percent as f32 / 100.0).clamp(0.0, 1.0);
+
+                        let bar_width = content_rect.width() - 80.0;
+                        let bar_size = egui::vec2(bar_width.max(120.0), 18.0);
+                        let (bar_rect, _) = content_ui.allocate_exact_size(bar_size, egui::Sense::hover());
+                        let bar_bg = egui::Color32::from_rgba_unmultiplied(255, 255, 255, (0.20_f32 * 255.0_f32).round() as u8);
+                        content_ui.painter().rect_filled(bar_rect, 9.0, bar_bg);
+                        let fill_w = bar_rect.width() * progress_ratio;
+                        if fill_w > 0.0 {
+                            let fill_rect = egui::Rect::from_min_max(bar_rect.min, egui::pos2(bar_rect.min.x + fill_w, bar_rect.max.y));
+                            content_ui.painter().rect_filled(fill_rect, 9.0, egui::Color32::WHITE);
+                        }
+                        // Percentage in black for readability over white bar
+                        content_ui.painter().text(
+                            bar_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            format!("{}%", progress_percent),
+                            egui::FontId::proportional(14.0),
+                            egui::Color32::BLACK,
+                        );
+                    }
+
+                    content_ui.add_space(14.0);
+
+                    // Centered vertical layout: Install, then white "Позже" below
+                    content_ui.vertical_centered(|ui| {
+                        // Install button
+                        let install_size = egui::vec2(220.0, 40.0);
+                        let (install_rect, install_resp) = ui.allocate_exact_size(install_size, egui::Sense::click());
+                        let install_hover_alpha = if install_resp.is_pointer_button_down_on() {
+                            (255f32 * 0.50).round() as u8
+                        } else if install_resp.hovered() {
+                            (255f32 * 0.80).round() as u8
+                        } else {
+                            255u8
+                        };
+                        let enabled = !downloading;
+                        let install_alpha = if enabled { install_hover_alpha } else { (255f32 * 0.45).round() as u8 };
+                        let install_fill = egui::Color32::from_rgba_unmultiplied(220, 220, 220, install_alpha);
+                        ui.painter().rect_filled(install_rect, 6.0, install_fill);
+                        ui.painter().rect_stroke(install_rect, 6.0, egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(0,0,0, install_hover_alpha)));
+                        #[cfg(target_os = "windows")]
+                        {
+                            let label = self.language.translate("Установить");
+                            let ppp = ctx.pixels_per_point();
+                            let w_px = (install_rect.width() * ppp).ceil() as usize;
+                            let h_px = (install_rect.height() * ppp).ceil() as usize;
+                            let key = format!("install_button:{}:{}:{}", label, w_px, h_px);
+                            let text_color = egui::Color32::from_rgba_unmultiplied(0, 0, 0, install_hover_alpha);
+                            if let Some(tex) = self.win_text_cache.get(&key) {
+                                ui.painter().image(tex.id(), install_rect, egui::Rect::from_min_max(egui::pos2(0.0,0.0), egui::pos2(1.0,1.0)), egui::Color32::WHITE);
+                            } else if let Some(tex) = win_text_to_texture(ctx, &key, &label, self.button_hfont, text_color, w_px, h_px) {
+                                self.win_text_cache.insert(key.clone(), tex.clone());
+                                ui.painter().image(tex.id(), install_rect, egui::Rect::from_min_max(egui::pos2(0.0,0.0), egui::pos2(1.0,1.0)), egui::Color32::WHITE);
+                            } else {
+                                ui.painter().text(install_rect.center(), egui::Align2::CENTER_CENTER, "Установить", egui::FontId::proportional(UI_BUTTON_FONT_SIZE), egui::Color32::BLACK);
+                            }
+                        }
+                        #[cfg(not(target_os = "windows"))]
+                        {
+                            let label = self.language.translate("Установить");
+                            ui.painter().text(install_rect.center(), egui::Align2::CENTER_CENTER, &label, egui::FontId::proportional(UI_BUTTON_FONT_SIZE), egui::Color32::BLACK);
+                        }
+                        if install_resp.is_pointer_button_down_on() {
+                            ctx.set_cursor_icon(egui::CursorIcon::Default);
+                        } else if install_resp.hovered() {
+                            ctx.set_cursor_icon(if !downloading { egui::CursorIcon::PointingHand } else { egui::CursorIcon::NotAllowed });
+                        }
+                        if install_resp.clicked() && !downloading {
+                            // Start download into exe directory with progress updates
+                            let dl_url = info.download_url.clone();
+                            let fname = info.asset_name.clone();
+                            let progress_atomic = update_check::UPDATE_DOWNLOAD_PROGRESS.get_or_init(|| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0))).clone();
+                            let downloading_flag = update_check::UPDATE_DOWNLOADING.get_or_init(|| std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false))).clone();
+                            progress_atomic.store(0, std::sync::atomic::Ordering::Relaxed);
+                            downloading_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            std::thread::spawn(move || {
+                                let agent = "vpnfybot-windows-update-install";
+                                if let Ok(resp) = ureq::get(&dl_url).set("User-Agent", agent).call() {
+                                    let total_opt = resp.header("Content-Length").and_then(|s| s.parse::<usize>().ok());
+                                    let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|pp| pp.to_path_buf())).unwrap_or_else(|| std::env::current_dir().unwrap_or(std::env::temp_dir()));
+                                    let safe_name = std::path::Path::new(&fname).file_name().and_then(|n| n.to_str()).unwrap_or("update_installer.exe").to_string();
+                                    if let Ok(mut file) = std::fs::File::create(exe_dir.join(&safe_name)) {
+                                        let mut reader = resp.into_reader();
+                                        let mut buf = [0u8; 8192];
+                                        let mut downloaded: usize = 0;
+                                        loop {
+                                            match reader.read(&mut buf) {
+                                                Ok(0) => break,
+                                                Ok(n) => {
+                                                    if file.write_all(&buf[..n]).is_err() { break; }
+                                                    downloaded += n;
+                                                    if let Some(total) = total_opt {
+                                                        let pct = ((downloaded as f64 / total as f64) * 100.0).round() as usize;
+                                                        progress_atomic.store(pct.min(100), std::sync::atomic::Ordering::Relaxed);
+                                                    } else {
+                                                        let prev = progress_atomic.load(std::sync::atomic::Ordering::Relaxed);
+                                                        let next = (prev + 1).min(99);
+                                                        progress_atomic.store(next, std::sync::atomic::Ordering::Relaxed);
+                                                    }
+                                                }
+                                                Err(_) => break,
+                                            }
+                                        }
+                                        progress_atomic.store(100, std::sync::atomic::Ordering::Relaxed);
+                                        #[cfg(target_os = "windows")]
+                                        {
+                                            // Decide whether to replace current exe or just run the downloaded file.
+                                            let downloaded_path = exe_dir.join(&safe_name);
+                                            if let Ok(current_exe) = std::env::current_exe() {
+                                                let current_name = current_exe
+                                                    .file_name()
+                                                    .and_then(|n| n.to_str())
+                                                    .unwrap_or_default()
+                                                    .to_lowercase();
+                                                let cur_no_ext = current_name.trim_end_matches(".exe").to_string();
+                                                let fname_no_ext = std::path::Path::new(&safe_name)
+                                                    .file_stem()
+                                                    .and_then(|s| s.to_str())
+                                                    .unwrap_or_default()
+                                                    .to_lowercase();
+
+                                                // If the downloaded file looks like our app (same base name or contains 'vpnfy'), perform an in-place replace.
+                                                let replace_candidate = fname_no_ext == cur_no_ext
+                                                    || fname_no_ext.contains("vpnfy")
+                                                    || cur_no_ext.contains(&fname_no_ext)
+                                                    || fname_no_ext.contains(&cur_no_ext);
+
+                                                if replace_candidate {
+                                                    // Create a small PowerShell script that waits for this process to exit, moves the downloaded exe into place, and launches it.
+                                                    let script_name = format!("vpnfy_update_{}.ps1", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0u128));
+                                                    let script_path = std::env::temp_dir().join(&script_name);
+                                                    let src = downloaded_path.display().to_string().replace("'", "''");
+                                                    let dst = current_exe.display().to_string().replace("'", "''");
+                                                    let procname = cur_no_ext.replace("'", "''");
+                                                    let script = format!(
+r#"$src = '{src}'
+$dst = '{dst}'
+$proc = '{proc}'
+Start-Sleep -Milliseconds 500
+$tries = 0
+while (Get-Process -Name $proc -ErrorAction SilentlyContinue) {{
+    Start-Sleep -Seconds 1
+    $tries += 1
+    if ($tries -gt 120) {{ exit 1 }}
+}}
+$success = $false
+$tries = 0
+while (-not $success -and $tries -lt 120) {{
+    try {{
+        Move-Item -Path $src -Destination $dst -Force -ErrorAction Stop
+        $success = $true
+    }} catch {{
+        Start-Sleep -Milliseconds 2500
+        $tries += 1
+    }}
+}}
+if ($success) {{
+    Start-Process -FilePath $dst
+    Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
+    exit 0
+}} else {{
+    exit 1
+}}
+"#, src=src, dst=dst, proc=procname);
+
+                                                    let _ = std::fs::write(&script_path, script.as_bytes());
+
+                                                    use std::os::windows::process::CommandExt;
+                                                    const CREATE_NO_WINDOW: u32 = 0x08000000;
+                                                    let mut cmd = std::process::Command::new("powershell");
+                                                    cmd.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script_path.to_str().unwrap_or_default()]);
+                                                    cmd.creation_flags(CREATE_NO_WINDOW);
+                                                    if let Ok(_) = cmd.spawn() {
+                                                        // Exit current process so the script can replace the exe.
+                                                        std::process::exit(0);
+                                                    } else {
+                                                        // Fallback: try to spawn the downloaded file and exit.
+                                                        let _ = std::process::Command::new(&downloaded_path).spawn();
+                                                        std::process::exit(0);
+                                                    }
+                                                } else {
+                                                    // Not a replacement candidate — just run the downloaded installer/app and exit.
+                                                    let _ = std::process::Command::new(downloaded_path).spawn();
+                                                    std::process::exit(0);
+                                                }
+                                            } else {
+                                                // Couldn't determine current exe — fallback to launching downloaded file.
+                                                let _ = std::process::Command::new(exe_dir.join(&safe_name)).spawn();
+                                                std::process::exit(0);
+                                            }
+                                        }
+                                    }
+                                }
+                                downloading_flag.store(false, std::sync::atomic::Ordering::Relaxed);
+                            });
+                        }
+
+                        ui.add_space(8.0);
+                        let later_size = install_size; // same width/height as Install
+                        let (later_rect, later_resp) = ui.allocate_exact_size(later_size, egui::Sense::click());
+                        // Match Install button style: same fill/shade and font rendering
+                        let later_hover_alpha = if later_resp.is_pointer_button_down_on() {
+                            (255f32 * 0.50).round() as u8
+                        } else if later_resp.hovered() {
+                            (255f32 * 0.80).round() as u8
+                        } else {
+                            255u8
+                        };
+                        // Use disconnect-style red shade for "Позже"; dim when disabled
+                        let later_alpha = if enabled { later_hover_alpha } else { (255f32 * 0.45).round() as u8 };
+                        let later_fill = egui::Color32::from_rgba_unmultiplied(180, 80, 80, later_alpha);
+                        ui.painter().rect_filled(later_rect, 6.0, later_fill);
+                        ui.painter().rect_stroke(later_rect, 6.0, egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(0,0,0, later_hover_alpha)));
+                        #[cfg(target_os = "windows")]
+                        {
+                            let label = self.language.translate("Позже");
+                            let ppp = ctx.pixels_per_point();
+                            let w_px = (later_rect.width() * ppp).ceil() as usize;
+                            let h_px = (later_rect.height() * ppp).ceil() as usize;
+                            let key = format!("later_button:{}:{}:{}", label, w_px, h_px);
+                            let text_color = egui::Color32::from_rgba_unmultiplied(0, 0, 0, later_hover_alpha);
+                            if let Some(tex) = self.win_text_cache.get(&key) {
+                                ui.painter().image(tex.id(), later_rect, egui::Rect::from_min_max(egui::pos2(0.0,0.0), egui::pos2(1.0,1.0)), egui::Color32::WHITE);
+                            } else if let Some(tex) = win_text_to_texture(ctx, &key, &label, self.button_hfont, text_color, w_px, h_px) {
+                                self.win_text_cache.insert(key.clone(), tex.clone());
+                                ui.painter().image(tex.id(), later_rect, egui::Rect::from_min_max(egui::pos2(0.0,0.0), egui::pos2(1.0,1.0)), egui::Color32::WHITE);
+                            } else {
+                                ui.painter().text(later_rect.center(), egui::Align2::CENTER_CENTER, &label, egui::FontId::proportional(UI_BUTTON_FONT_SIZE), egui::Color32::BLACK);
+                            }
+                        }
+                        #[cfg(not(target_os = "windows"))]
+                        {
+                            let label = self.language.translate("Позже");
+                            ui.painter().text(later_rect.center(), egui::Align2::CENTER_CENTER, &label, egui::FontId::proportional(UI_BUTTON_FONT_SIZE), egui::Color32::BLACK);
+                        }
+                        if later_resp.is_pointer_button_down_on() {
+                            ctx.set_cursor_icon(egui::CursorIcon::Default);
+                        } else if later_resp.hovered() {
+                            ctx.set_cursor_icon(if !downloading { egui::CursorIcon::PointingHand } else { egui::CursorIcon::NotAllowed });
+                        }
+                        if later_resp.clicked() && !downloading {
+                            self.update_pending = None;
+                        }
+                    });
+
+                    // Keep repainting while downloading
+                    if update_check::UPDATE_DOWNLOADING.get().map(|d| d.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(false) {
+                        ctx.request_repaint();
+                    }
+                });
+        }
 
         self.handle_dropped_files(ctx);
 
@@ -513,6 +822,8 @@ impl App for AppState {
                     self.last_process_refresh = Some(Instant::now());
                 }
             });
+
+        // Manual update button removed; update checks run on startup.
 
         // Top-right language button overlay
         egui::Area::new("language_button".into())
@@ -1324,9 +1635,9 @@ impl App for AppState {
                                 self.language.translate("Вся система")
                             };
                             let mode_description_text = if self.proxy_mode_toggle {
-                                self.language.translate("В режиме \"Выбранные приложения\" сайты из списка \"Сайты через VPN\" и выбранные приложения из списка \"Выбранные приложения\" будут идти через VPN туннель")
+                                self.language.translate("В режиме \"Выбранные приложения\" сайты из списка \"Сайты через VPN\" и приложения из списка \"Приложения через VPN\" будут идти через VPN туннель")
                             } else {
-                                self.language.translate("В режиме \"Вся система\" сайты из списка \"Сайты через VPN\" и выбранные приложения из списка \"Выбранные приложения\" будут исключены из VPN туннеля")
+                                self.language.translate("В режиме \"Вся система\" сайты из списка \"Исключенные сайты\" и приложения из списка \"Исключенные приложения\" будут исключены из VPN туннеля")
                             };
                             let mode_enabled = !self.service_active;
                             let (settings_rect, _) = ui.allocate_exact_size(
@@ -1626,11 +1937,18 @@ impl App for AppState {
 
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                     ui.add_space(10.0);
-                    ui.label(
-                        egui::RichText::new(env!("CARGO_PKG_VERSION"))
-                            .color(egui::Color32::from_white_alpha(64))
-                            .text_style(egui::TextStyle::Button),
-                    );
+                    {
+                        let version_text = if update_check::UPDATE_CHECK_RUNNING.get().map(|b| b.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(false) {
+                            self.language.translate("Проверка обновлений")
+                        } else {
+                            env!("CARGO_PKG_VERSION").to_string()
+                        };
+                        ui.label(
+                            egui::RichText::new(version_text)
+                                .color(egui::Color32::from_white_alpha(64))
+                                .text_style(egui::TextStyle::Button),
+                        );
+                    }
                     ui.add_space(10.0);
                     let link_enabled = !controls_locked_by_settings;
                     let link_text = "t.me/vpnfybot";
@@ -1731,6 +2049,7 @@ impl App for AppState {
 }
 
 impl AppState {
+    #[allow(dead_code)]
     fn get_tunnel_total_bytes(&self) -> Option<u64> {
         let info_addr = self.wireproxy_info_addr.as_deref()?;
         let metrics = fetch_wireproxy_metrics(info_addr)?;
@@ -2080,6 +2399,7 @@ fn button_font_id() -> egui::FontId {
     )
 }
 
+#[allow(dead_code)]
 fn button_font_small_id() -> egui::FontId {
     egui::FontId::new(
         UI_BUTTON_FONT_SIZE - 4.0,
@@ -2681,12 +3001,26 @@ pub(crate) fn app_main() -> eframe::Result<()> {
     // Проверка обновлений — выполняется однократно при старте приложения
     // Пытаемся определить origin remote и опросить GitHub Releases API
     // Запускаем в отдельном потоке, чтобы не блокировать GUI.
-    {
-        std::thread::spawn(|| {
-            // Получаем URL origin (если есть)
-            let origin_out = std::process::Command::new("git")
-                .args(["remote", "get-url", "origin"])
-                .output();
+        {
+            std::thread::spawn(|| {
+                // Получаем URL origin (если есть)
+                let origin_out = {
+                    #[cfg(target_os = "windows")]
+                    {
+                        use std::os::windows::process::CommandExt;
+                        const CREATE_NO_WINDOW: u32 = 0x08000000;
+                        std::process::Command::new("git")
+                            .args(["remote", "get-url", "origin"])
+                            .creation_flags(CREATE_NO_WINDOW)
+                            .output()
+                    }
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        std::process::Command::new("git")
+                            .args(["remote", "get-url", "origin"])
+                            .output()
+                    }
+                };
             let url = match origin_out {
                 Ok(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
                 Err(_) => return,
@@ -2734,7 +3068,11 @@ pub(crate) fn app_main() -> eframe::Result<()> {
                 Err(_) => return,
             };
 
-            let json: serde_json::Value = match resp.into_json() {
+            let json_str = match resp.into_string() {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            let json: serde_json::Value = match serde_json::from_str(&json_str) {
                 Ok(j) => j,
                 Err(_) => return,
             };
@@ -2769,7 +3107,9 @@ pub(crate) fn app_main() -> eframe::Result<()> {
                         if lname.ends_with(".exe") && (lname.contains("setup") || lname.contains("installer")) {
                             // Скачиваем и запускаем установщик
                             if let Ok(setup_resp) = ureq::get(dl).call() {
-                                if let Ok(bytes) = setup_resp.into_bytes() {
+                                let mut reader = setup_resp.into_reader();
+                                let mut bytes: Vec<u8> = Vec::new();
+                                if reader.read_to_end(&mut bytes).is_ok() {
                                     let tmp_path = std::env::temp_dir().join(name);
                                     if std::fs::write(&tmp_path, &bytes).is_ok() {
                                         #[cfg(target_os = "windows")]
@@ -2918,6 +3258,7 @@ fn fetch_wireproxy_metrics(info_addr: &str) -> Option<String> {
     Some(body.to_string())
 }
 
+#[allow(dead_code)]
 fn parse_wireproxy_metrics_total_bytes(metrics: &str) -> Option<u64> {
     let mut total_bytes = 0u64;
     let mut found_counter = false;
@@ -3908,6 +4249,7 @@ fn create_smooth_ui_font_with_weight(size_px: i32, weight: i32) -> Option<HFONT>
     }
 }
 
+#[allow(dead_code)]
 fn create_nonsmooth_ui_font_with_weight(size_px: i32, weight: i32) -> Option<HFONT> {
     unsafe {
         // Use NONANTIALIASED_QUALITY (3) to disable smoothing
@@ -3920,10 +4262,12 @@ fn create_nonsmooth_ui_font_with_weight(size_px: i32, weight: i32) -> Option<HFO
     }
 }
 
+#[allow(dead_code)]
 fn create_nonsmooth_ui_font(size_px: i32) -> Option<HFONT> {
     create_nonsmooth_ui_font_with_weight(size_px, 400)
 }
 
+#[allow(dead_code)]
 fn create_nonsmooth_ui_font_light(size_px: i32) -> Option<HFONT> {
     create_nonsmooth_ui_font_with_weight(size_px, 300)
 }

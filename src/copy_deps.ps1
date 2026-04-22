@@ -7,11 +7,11 @@ $srcDir = $PSScriptRoot
 
 # Create list of files to copy
 $filesToCopy = @(
-    @{Source = Join-Path $workspaceRoot "proxybridge-master\Windows\ProxyBridgeCore.dll"; Dest = "embedded_deps\ProxyBridgeCore.dll"},
-    @{Source = Join-Path $workspaceRoot "proxybridge-master\Windows\cli\bin\Release\net10.0-windows\win-x64\native\ProxyBridge_CLI.exe"; Dest = "embedded_deps\ProxyBridge_CLI.exe"},
-    @{Source = Join-Path $workspaceRoot "wireproxy-master\wireproxy.exe"; Dest = "embedded_deps\wireproxy.exe"},
-    @{Source = Join-Path $workspaceRoot "WinDivert-2.2.2-A\x64\WinDivert.dll"; Dest = "embedded_deps\WinDivert.dll"},
-    @{Source = Join-Path $workspaceRoot "WinDivert-2.2.2-A\x64\WinDivert64.sys"; Dest = "embedded_deps\WinDivert64.sys"}
+    @{Source = Join-Path $workspaceRoot "third-party\proxybridge-master\Windows\ProxyBridgeCore.dll"; Dest = "embedded_deps\ProxyBridgeCore.dll"},
+    @{Source = Join-Path $workspaceRoot "third-party\proxybridge-master\Windows\cli\bin\Release\net10.0-windows\win-x64\native\ProxyBridge_CLI.exe"; Dest = "embedded_deps\ProxyBridge_CLI.exe"},
+    @{Source = Join-Path $workspaceRoot "third-party\wireproxy-master\wireproxy.exe"; Dest = "embedded_deps\wireproxy.exe"},
+    @{Source = Join-Path $workspaceRoot "third-party\WinDivert-2.2.2-A\x64\WinDivert.dll"; Dest = "embedded_deps\WinDivert.dll"},
+    @{Source = Join-Path $workspaceRoot "third-party\WinDivert-2.2.2-A\x64\WinDivert64.sys"; Dest = "embedded_deps\WinDivert64.sys"}
 )
 
 # Create directory for embedded dependencies
