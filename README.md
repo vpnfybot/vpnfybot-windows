@@ -77,12 +77,6 @@ This tool fills that gap with a flexible and user-friendly solution.
 
 ---
 
-## 📄 License
-
-This project is licensed under the MIT License.
-
----
-
 <p align="center">
   Made with ❤️ from <a href="https://t.me/vpnfybot">@vpnfybot</a>
 </p>
