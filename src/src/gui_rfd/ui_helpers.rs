@@ -45,6 +45,10 @@ pub(super) fn configure_egui_button_font(ctx: &egui::Context) {
     style
         .text_styles
         .insert(egui::TextStyle::Button, button_font_id());
+    style.visuals.widgets.inactive.fg_stroke.color = egui::Color32::BLACK;
+    style.visuals.widgets.hovered.fg_stroke.color = egui::Color32::BLACK;
+    style.visuals.widgets.active.fg_stroke.color = egui::Color32::BLACK;
+    style.visuals.widgets.open.fg_stroke.color = egui::Color32::BLACK;
     ctx.set_style(style);
 }
 

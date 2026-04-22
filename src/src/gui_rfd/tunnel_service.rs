@@ -1,5 +1,17 @@
 use super::*;
 
+const PROCESS_LIST_CACHE_TTL: Duration = Duration::from_secs(5);
+const PROCESS_EXIT_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
+const PROCESS_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+static PROCESS_LIST_CACHE: OnceLock<Mutex<Option<ProcessListCache>>> = OnceLock::new();
+static PROCESS_LIST_REFRESH_RUNNING: AtomicBool = AtomicBool::new(false);
+
+struct ProcessListCache {
+    processes: Vec<String>,
+    refreshed_at: Instant,
+}
+
 fn save_config_to_cache(conf_path: &str) {
     let cache_dir = super::managed_cache_dir();
 
@@ -113,6 +125,239 @@ pub(super) fn parse_wireproxy_metrics_rx_tx(metrics: &str) -> Option<(u64, u64)>
     }
 
     found_counter.then_some((tx_total, rx_total))
+}
+
+fn enumerate_running_processes() -> Vec<String> {
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::everything()
+            .with_exe(UpdateKind::OnlyIfNotSet)
+            .with_cmd(UpdateKind::OnlyIfNotSet)
+            .with_user(UpdateKind::OnlyIfNotSet),
+    );
+
+    let mut processes: Vec<String> = system
+        .processes()
+        .values()
+        .filter_map(|process| {
+            let name = process.name().to_string_lossy().to_string();
+            if name.is_empty() || name.starts_with('[') {
+                return None;
+            }
+
+            let lname = name.to_lowercase();
+            if lname == "system" || lname == "system idle process" || lname == "idle" {
+                return None;
+            }
+
+            let exe_path = process
+                .exe()
+                .map(|path| path.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            if exe_path.starts_with("c:\\windows\\")
+                || exe_path.contains("\\system32\\")
+                || exe_path.contains("\\syswow64\\")
+            {
+                return None;
+            }
+
+            Some(name)
+        })
+        .collect();
+
+    if processes.is_empty() {
+        if let Ok(output) = std::process::Command::new("tasklist")
+            .args(["/FO", "CSV", "/NH"])
+            .output()
+        {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                processes = stdout
+                    .lines()
+                    .filter_map(|line| {
+                        let trimmed = line.trim();
+                        let first = trimmed.strip_prefix('"')?.split("\",\"").next()?;
+                        if first.is_empty() || first.starts_with('[') {
+                            return None;
+                        }
+                        let fname = first.to_string();
+                        let lf = fname.to_lowercase();
+                        if lf == "system" || lf == "system idle process" || lf == "idle" {
+                            return None;
+                        }
+                        Some(fname)
+                    })
+                    .collect();
+            }
+        }
+    }
+
+    processes.retain(|process_name| {
+        let lower = process_name.to_lowercase();
+        if lower.starts_with('[') {
+            return false;
+        }
+        if lower == "system" || lower == "system idle process" || lower == "idle" {
+            return false;
+        }
+        true
+    });
+
+    processes.sort();
+    processes.dedup();
+    processes.truncate(100);
+    processes
+}
+
+fn process_list_cache() -> &'static Mutex<Option<ProcessListCache>> {
+    PROCESS_LIST_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+fn store_running_processes(processes: &[String]) {
+    if let Ok(mut guard) = process_list_cache().lock() {
+        *guard = Some(ProcessListCache {
+            processes: processes.to_vec(),
+            refreshed_at: Instant::now(),
+        });
+    }
+}
+
+fn get_cached_running_processes() -> Option<Vec<String>> {
+    let guard = process_list_cache().lock().ok()?;
+    let cache = guard.as_ref()?;
+    if cache.refreshed_at.elapsed() <= PROCESS_LIST_CACHE_TTL {
+        Some(cache.processes.clone())
+    } else {
+        None
+    }
+}
+
+pub(super) fn refresh_running_processes_async() {
+    if PROCESS_LIST_REFRESH_RUNNING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    thread::spawn(|| {
+        struct ResetFlag;
+
+        impl Drop for ResetFlag {
+            fn drop(&mut self) {
+                PROCESS_LIST_REFRESH_RUNNING.store(false, Ordering::SeqCst);
+            }
+        }
+
+        let _reset_flag = ResetFlag;
+        let processes = enumerate_running_processes();
+        store_running_processes(&processes);
+    });
+}
+
+fn process_name_matches(process: &sysinfo::Process, expected_name: &str) -> bool {
+    let actual = process.name().to_string_lossy().to_ascii_lowercase();
+    let normalized_expected = expected_name.trim_end_matches(".exe").to_ascii_lowercase();
+
+    actual == normalized_expected
+        || actual == format!("{}.exe", normalized_expected)
+        || actual.contains(&normalized_expected)
+}
+
+fn kill_processes_matching<F>(mut predicate: F) -> bool
+where
+    F: FnMut(&sysinfo::Process) -> bool,
+{
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::everything()
+            .with_exe(UpdateKind::OnlyIfNotSet)
+            .with_cmd(UpdateKind::OnlyIfNotSet),
+    );
+
+    let mut killed_any = false;
+    for process in system.processes().values() {
+        if predicate(process) {
+            let _ = process.kill();
+            killed_any = true;
+        }
+    }
+
+    killed_any
+}
+
+fn any_process_matches<F>(mut predicate: F) -> bool
+where
+    F: FnMut(&sysinfo::Process) -> bool,
+{
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::everything()
+            .with_exe(UpdateKind::OnlyIfNotSet)
+            .with_cmd(UpdateKind::OnlyIfNotSet),
+    );
+
+    system.processes().values().any(|process| predicate(process))
+}
+
+fn wait_until_processes_exit<F>(predicate: F, timeout: Duration) -> bool
+where
+    F: FnMut(&sysinfo::Process) -> bool + Copy,
+{
+    let started = Instant::now();
+    loop {
+        if !any_process_matches(predicate) {
+            return true;
+        }
+
+        if started.elapsed() >= timeout {
+            return false;
+        }
+
+        thread::sleep(PROCESS_EXIT_POLL_INTERVAL);
+    }
+}
+
+fn fallback_taskkill_image(image_name: &str) {
+    let mut taskkill = std::process::Command::new("taskkill");
+    taskkill
+        .arg("/IM")
+        .arg(image_name)
+        .arg("/F")
+        .arg("/T")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        taskkill.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let _ = taskkill.output();
+}
+
+fn read_log_tail(path: &Path, max_bytes: usize) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut file = std::fs::File::open(path).ok()?;
+    let length = file.metadata().ok()?.len();
+    let start = length.saturating_sub(max_bytes as u64);
+    file.seek(SeekFrom::Start(start)).ok()?;
+
+    let mut tail = String::new();
+    file.read_to_string(&mut tail).ok()?;
+    Some(tail)
 }
 
 pub(super) fn create_and_start_service(conf: &str) -> ServiceResult {
@@ -230,61 +475,34 @@ pub(super) fn stop_and_delete_service(conf: &str) -> ServiceResult {
     let config_path = Path::new(conf).canonicalize().ok().map(|p| p.to_string_lossy().to_string());
     let temp_config_path = super::managed_cache_dir().join("vpnfy_wireproxy_temp.conf").to_string_lossy().to_string();
 
-    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate};
-    let mut system = sysinfo::System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        true,
-        ProcessRefreshKind::new(),
-    );
-
-    let mut killed = false;
-    for (pid, process) in system.processes().iter() {
-        let proc_name = process.name().to_string_lossy().to_lowercase();
-        if proc_name.contains("wireproxy") {
-            let has_matching_config = process.cmd().iter().any(|arg| {
-                let arg_str = arg.to_string_lossy();
-                config_path.as_ref().map_or(false, |cp| arg_str.contains(cp))
-                    || arg_str.contains(&temp_config_path)
-            });
-
-            if has_matching_config || config_path.is_none() {
-                let mut tk = std::process::Command::new("taskkill");
-                tk.arg("/PID").arg(pid.to_string()).arg("/F")
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null());
-                #[cfg(target_os = "windows")]
-                {
-                    use std::os::windows::process::CommandExt;
-                    const CREATE_NO_WINDOW: u32 = 0x08000000;
-                    tk.creation_flags(CREATE_NO_WINDOW);
-                }
-
-                if let Ok(output) = tk.output() {
-                    if output.status.success() {
-                        killed = true;
-                    }
-                }
-            }
+    let mut killed = kill_processes_matching(|process| {
+        if !process_name_matches(process, "wireproxy.exe") {
+            return false;
         }
+
+        let has_matching_config = process.cmd().iter().any(|arg| {
+            let arg_str = arg.to_string_lossy();
+            config_path.as_ref().map_or(false, |cp| arg_str.contains(cp))
+                || arg_str.contains(&temp_config_path)
+        });
+
+        has_matching_config || config_path.is_none()
+    });
+
+    if killed {
+        let _ = wait_until_processes_exit(
+            |process| process_name_matches(process, "wireproxy.exe"),
+            PROCESS_EXIT_WAIT_TIMEOUT,
+        );
     }
 
-    if !killed {
-        let mut tk = std::process::Command::new("taskkill");
-        tk.arg("/IM").arg("wireproxy.exe").arg("/F").arg("/T")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            tk.creation_flags(CREATE_NO_WINDOW);
-        }
-        if let Ok(output) = tk.output() {
-            if output.status.success() {
-                killed = true;
-            }
-        }
+    if any_process_matches(|process| process_name_matches(process, "wireproxy.exe")) {
+        fallback_taskkill_image("wireproxy.exe");
+        killed = true;
+        let _ = wait_until_processes_exit(
+            |process| process_name_matches(process, "wireproxy.exe"),
+            PROCESS_EXIT_WAIT_TIMEOUT,
+        );
     }
 
     if killed {
@@ -305,82 +523,12 @@ pub(super) fn stop_and_delete_service(conf: &str) -> ServiceResult {
 }
 
 pub(super) fn get_running_processes() -> Vec<String> {
-    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
-
-    let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        true,
-        ProcessRefreshKind::everything()
-            .with_exe(UpdateKind::OnlyIfNotSet)
-            .with_cmd(UpdateKind::OnlyIfNotSet)
-            .with_user(UpdateKind::OnlyIfNotSet),
-    );
-
-    let mut processes: Vec<String> = system.processes()
-        .values()
-        .filter_map(|process| {
-            let name = process.name().to_string_lossy().to_string();
-            if name.is_empty() || name.starts_with('[') {
-                return None;
-            }
-
-            let lname = name.to_lowercase();
-            if lname == "system" || lname == "system idle process" || lname == "idle" {
-                return None;
-            }
-
-            let exe_path = process.exe().map(|p| p.to_string_lossy().to_lowercase()).unwrap_or_default();
-            if exe_path.starts_with("c:\\windows\\") || exe_path.contains("\\system32\\") || exe_path.contains("\\syswow64\\") {
-                return None;
-            }
-
-            Some(name)
-        })
-        .collect();
-
-    if processes.is_empty() {
-        if let Ok(output) = std::process::Command::new("tasklist")
-            .args(["/FO", "CSV", "/NH"])
-            .output()
-        {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                processes = stdout
-                    .lines()
-                    .filter_map(|line| {
-                        let trimmed = line.trim();
-                        let first = trimmed.strip_prefix('"')?.split("\",\"").next()?;
-                        if first.is_empty() || first.starts_with('[') {
-                            return None;
-                        }
-                        let fname = first.to_string();
-                        let lf = fname.to_lowercase();
-                        if lf == "system" || lf == "system idle process" || lf == "idle" {
-                            return None;
-                        }
-                        Some(fname)
-                    })
-                    .collect();
-            }
-        }
+    if let Some(processes) = get_cached_running_processes() {
+        return processes;
     }
 
-    processes.retain(|p| {
-        let lp = p.to_lowercase();
-        if lp.starts_with('[') {
-            return false;
-        }
-        if lp == "system" || lp == "system idle process" || lp == "idle" {
-            return false;
-        }
-        true
-    });
-
-    processes.sort();
-    processes.dedup();
-    processes.truncate(100);
-
+    let processes = enumerate_running_processes();
+    store_running_processes(&processes);
     processes
 }
 
@@ -585,26 +733,33 @@ pub(super) fn start_proxybridge(processes: &[String], selected_sites: &[String],
 
     let wait_for_start = |timeout_secs: u64| -> Result<(), String> {
         let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(timeout_secs);
         loop {
-            if start.elapsed() > std::time::Duration::from_secs(timeout_secs) {
-                if let Ok(s) = std::fs::read_to_string(&log_path) {
-                    let tail = if s.len() > 4000 { s[s.len()-4000..].to_string() } else { s };
+            if start.elapsed() > timeout {
+                if let Some(tail) = read_log_tail(&log_path, 4096) {
                     return Err(format!("ProxyBridge не запустился в отведённое время. Лог:\n{}", tail));
-                } else {
-                    return Err("ProxyBridge не запустился и лог недоступен".to_string());
                 }
+
+                return Err("ProxyBridge не запустился и лог недоступен".to_string());
             }
 
-            if let Ok(s) = std::fs::read_to_string(&log_path) {
-                if s.contains("ProxyBridge started") || s.contains("ProxyBridge started.") || s.contains("Local relay:") {
+            if let Some(tail) = read_log_tail(&log_path, 4096) {
+                if tail.contains("ProxyBridge started")
+                    || tail.contains("ProxyBridge started.")
+                    || tail.contains("Local relay:")
+                {
                     return Ok(());
                 }
-                if s.contains("Failed to open WinDivert") || s.contains("ERROR: Failed to start ProxyBridge") || s.contains("ERROR: ProxyBridge requires Administrator privileges") {
-                    let tail = if s.len() > 4000 { s[s.len()-4000..].to_string() } else { s };
+
+                if tail.contains("Failed to open WinDivert")
+                    || tail.contains("ERROR: Failed to start ProxyBridge")
+                    || tail.contains("ERROR: ProxyBridge requires Administrator privileges")
+                {
                     return Err(format!("ProxyBridge запущен с ошибкой:\n{}", tail));
                 }
             }
-            std::thread::sleep(std::time::Duration::from_millis(500));
+
+            std::thread::sleep(std::time::Duration::from_millis(200));
         }
     };
 
@@ -697,129 +852,40 @@ pub(super) fn stop_proxybridge() -> Result<(), String> {
 
     let _ = std::fs::remove_file(&pid_file);
 
-    let mut stop_cmd = std::process::Command::new("powershell");
-    stop_cmd.args(["-Command", "Stop-Process -Name 'ProxyBridge_CLI' -Force -ErrorAction SilentlyContinue"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        stop_cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    let _stop_result = stop_cmd
-        .output()
-        .map_err(|e| format!("Не удалось остановить ProxyBridge процессы: {}", e))?;
+    let _ = kill_processes_matching(|process| process_name_matches(process, "ProxyBridge_CLI.exe"));
 
-    let mut tk2 = std::process::Command::new("taskkill");
-    tk2.arg("/IM").arg("ProxyBridge_CLI.exe").arg("/F")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        tk2.creation_flags(CREATE_NO_WINDOW);
-    }
-    let _ = tk2.output();
+    if !wait_until_processes_exit(
+        |process| process_name_matches(process, "ProxyBridge_CLI.exe"),
+        PROCESS_EXIT_WAIT_TIMEOUT,
+    ) {
+        fallback_taskkill_image("ProxyBridge_CLI.exe");
 
-    std::thread::sleep(std::time::Duration::from_millis(500));
-
-    let processes_still_running = check_proxybridge_processes();
-
-    if processes_still_running {
-        let mut ps_kill = std::process::Command::new("powershell");
-        ps_kill.args(["-Command", "Get-Process -Name 'ProxyBridge_CLI' -ErrorAction SilentlyContinue | ForEach-Object { try { Stop-Process -Id $_.Id -Force -ErrorAction Stop } catch { Write-Error \"Failed to stop process $($_.Id): $_\" } }"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            ps_kill.creation_flags(CREATE_NO_WINDOW);
-        }
-        let _ = ps_kill.output();
-
-        std::thread::sleep(std::time::Duration::from_millis(800));
-
-        if check_proxybridge_processes() {
-            let mut wmic_cmd = std::process::Command::new("wmic");
-            wmic_cmd.args(["process", "where", "name='ProxyBridge_CLI.exe'", "delete"])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null());
-            #[cfg(target_os = "windows")]
-            {
-                use std::os::windows::process::CommandExt;
-                const CREATE_NO_WINDOW: u32 = 0x08000000;
-                wmic_cmd.creation_flags(CREATE_NO_WINDOW);
-            }
-            let _ = wmic_cmd.output();
-
-            std::thread::sleep(std::time::Duration::from_millis(500));
-
-            if check_proxybridge_processes() {
-                return Err("Не удалось остановить все процессы ProxyBridge_CLI.exe".to_string());
-            }
+        if !wait_until_processes_exit(
+            |process| process_name_matches(process, "ProxyBridge_CLI.exe"),
+            PROCESS_EXIT_WAIT_TIMEOUT,
+        ) {
+            return Err("Не удалось остановить все процессы ProxyBridge_CLI.exe".to_string());
         }
     }
 
     Ok(())
 }
 
-fn check_proxybridge_processes() -> bool {
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
+pub(super) fn kill_existing_processes() {
+    let _ = kill_processes_matching(|process| process_name_matches(process, "wireproxy.exe"));
+    let _ = kill_processes_matching(|process| process_name_matches(process, "ProxyBridge_CLI.exe"));
 
-        let mut ps_check = std::process::Command::new("powershell");
-        ps_check.args(["-Command", "Get-Process -Name 'ProxyBridge_CLI' -ErrorAction SilentlyContinue | Select-Object -First 1"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        ps_check.creation_flags(CREATE_NO_WINDOW);
-
-        if let Ok(output) = ps_check.output() {
-            if output.status.success() {
-                let output_str = String::from_utf8_lossy(&output.stdout);
-                return output_str.contains("ProxyBridge_CLI");
-            }
-        }
+    if !wait_until_processes_exit(
+        |process| process_name_matches(process, "wireproxy.exe"),
+        PROCESS_EXIT_WAIT_TIMEOUT,
+    ) {
+        fallback_taskkill_image("wireproxy.exe");
     }
 
-    false
-}
-
-pub(super) fn kill_existing_processes() {
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-        let mut wireproxy_kill = std::process::Command::new("taskkill");
-        wireproxy_kill.arg("/IM").arg("wireproxy.exe").arg("/F").arg("/T")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        wireproxy_kill.creation_flags(CREATE_NO_WINDOW);
-        let _ = wireproxy_kill.output();
-
-        std::thread::sleep(std::time::Duration::from_millis(300));
-
-        let mut proxybridge_kill = std::process::Command::new("taskkill");
-        proxybridge_kill.arg("/IM").arg("ProxyBridge_CLI.exe").arg("/F").arg("/T")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        proxybridge_kill.creation_flags(CREATE_NO_WINDOW);
-        let _ = proxybridge_kill.output();
-
-        std::thread::sleep(std::time::Duration::from_millis(500));
-
-        let mut ps_kill = std::process::Command::new("powershell");
-        ps_kill.args(["-Command", "Get-Process -Name 'ProxyBridge_CLI' -ErrorAction SilentlyContinue | ForEach-Object { try { Stop-Process -Id $_.Id -Force -ErrorAction Stop } catch { Write-Error \"Failed to stop process $($_.Id): $_\" } }"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        ps_kill.creation_flags(CREATE_NO_WINDOW);
-        let _ = ps_kill.output();
-
-        std::thread::sleep(std::time::Duration::from_millis(500));
+    if !wait_until_processes_exit(
+        |process| process_name_matches(process, "ProxyBridge_CLI.exe"),
+        PROCESS_EXIT_WAIT_TIMEOUT,
+    ) {
+        fallback_taskkill_image("ProxyBridge_CLI.exe");
     }
 }

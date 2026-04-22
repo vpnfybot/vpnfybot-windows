@@ -1,0 +1,14 @@
+C:\Users\vayzer\Desktop\vpnfybot-windows\src\target\release\deps\serde-dc9ad50d70ca18a6.d: C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs C:\Users\vayzer\Desktop\vpnfybot-windows\src\target\release\build\serde-ed0577fbb863e4bf\out/private.rs
+
+C:\Users\vayzer\Desktop\vpnfybot-windows\src\target\release\deps\libserde-dc9ad50d70ca18a6.rlib: C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs C:\Users\vayzer\Desktop\vpnfybot-windows\src\target\release\build\serde-ed0577fbb863e4bf\out/private.rs
+
+C:\Users\vayzer\Desktop\vpnfybot-windows\src\target\release\deps\libserde-dc9ad50d70ca18a6.rmeta: C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs C:\Users\vayzer\Desktop\vpnfybot-windows\src\target\release\build\serde-ed0577fbb863e4bf\out/private.rs
+
+C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs:
+C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs:
+C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs:
+C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs:
+C:\Users\vayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs:
+C:\Users\vayzer\Desktop\vpnfybot-windows\src\target\release\build\serde-ed0577fbb863e4bf\out/private.rs:
+
+# env-dep:OUT_DIR=C:\\Users\\vayzer\\Desktop\\vpnfybot-windows\\src\\target\\release\\build\\serde-ed0577fbb863e4bf\\out
