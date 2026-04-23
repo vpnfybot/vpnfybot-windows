@@ -1268,6 +1268,13 @@ static int socks5_connect(SOCKET s, UINT32 dest_ip, UINT16 dest_port)
 {
     unsigned char buf[SOCKS5_BUFFER_SIZE];
     int len;
+    char dest_ip_str[32];
+
+    snprintf(dest_ip_str, sizeof(dest_ip_str), "%d.%d.%d.%d",
+        (dest_ip >> 0) & 0xFF,
+        (dest_ip >> 8) & 0xFF,
+        (dest_ip >> 16) & 0xFF,
+        (dest_ip >> 24) & 0xFF);
     BOOL use_auth = (g_proxy_username[0] != '\0');
 
     buf[0] = SOCKS5_VERSION;
@@ -1293,10 +1300,9 @@ static int socks5_connect(SOCKET s, UINT32 dest_ip, UINT16 dest_port)
         }
     }
 
-    len = recv(s, (char*)buf, 2, 0);
-    if (len != 2 || buf[0] != SOCKS5_VERSION)
+    if (recv_all(s, buf, 2) != 2 || buf[0] != SOCKS5_VERSION)
     {
-        log_message("SOCKS5: Invalid auth response");
+        log_message("SOCKS5: Invalid auth response for %s:%d", dest_ip_str, dest_port);
         return -1;
     }
 
@@ -1330,10 +1336,9 @@ static int socks5_connect(SOCKET s, UINT32 dest_ip, UINT16 dest_port)
             return -1;
         }
 
-        len = recv(s, (char*)buf, 2, 0);
-        if (len != 2 || buf[0] != 0x01 || buf[1] != 0x00)
+        if (recv_all(s, buf, 2) != 2 || buf[0] != 0x01 || buf[1] != 0x00)
         {
-            log_message("SOCKS5: Authentication failed");
+            log_message("SOCKS5: Authentication failed for %s:%d", dest_ip_str, dest_port);
             return -1;
         }
         log_message("SOCKS5: Authentication successful");
@@ -1361,11 +1366,52 @@ static int socks5_connect(SOCKET s, UINT32 dest_ip, UINT16 dest_port)
         return -1;
     }
 
-    len = recv(s, (char*)buf, 10, 0);
-    if (len < 10 || buf[0] != SOCKS5_VERSION || buf[1] != 0x00)
+    if (recv_all(s, buf, 4) != 4 || buf[0] != SOCKS5_VERSION || buf[1] != 0x00)
     {
-        log_message("SOCKS5: CONNECT failed (reply=%d)", len > 1 ? buf[1] : -1);
+        log_message("SOCKS5: CONNECT failed for %s:%d (reply=%d)",
+            dest_ip_str, dest_port, buf[1]);
         return -1;
+    }
+
+    switch (buf[3])
+    {
+        case SOCKS5_ATYP_IPV4:
+            if (recv_all(s, buf, 6) != 6)
+            {
+                log_message("SOCKS5: CONNECT response truncated for %s:%d (IPv4)", dest_ip_str, dest_port);
+                return -1;
+            }
+            break;
+
+        case SOCKS5_ATYP_DOMAIN:
+        {
+            unsigned char domain_len;
+            if (recv_all(s, &domain_len, 1) != 1)
+            {
+                log_message("SOCKS5: CONNECT response missing domain length for %s:%d", dest_ip_str, dest_port);
+                return -1;
+            }
+
+            if (recv_all(s, buf, domain_len + 2) != domain_len + 2)
+            {
+                log_message("SOCKS5: CONNECT response truncated for %s:%d (domain)", dest_ip_str, dest_port);
+                return -1;
+            }
+            break;
+        }
+
+        case SOCKS5_ATYP_IPV6:
+            if (recv_all(s, buf, 18) != 18)
+            {
+                log_message("SOCKS5: CONNECT response truncated for %s:%d (IPv6)", dest_ip_str, dest_port);
+                return -1;
+            }
+            break;
+
+        default:
+            log_message("SOCKS5: CONNECT response has unsupported ATYP 0x%02X for %s:%d",
+                buf[3], dest_ip_str, dest_port);
+            return -1;
     }
 
     return 0;

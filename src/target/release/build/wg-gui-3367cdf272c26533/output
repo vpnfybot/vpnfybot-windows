@@ -1,0 +1,18 @@
+cargo:rerun-if-changed=C:\Users\vayzer\Desktop\vpnfybot-windows\src\gifs/vpnfy.png
+cargo:rerun-if-changed=C:\Users\vayzer\Desktop\vpnfybot-windows\src\app.rc
+cargo:rerun-if-changed=C:\Users\vayzer\Desktop\vpnfybot-windows\src\embedded_deps\ProxyBridgeCore.dll
+cargo:rerun-if-changed=C:\Users\vayzer\Desktop\vpnfybot-windows\src\embedded_deps\ProxyBridge_CLI.exe
+cargo:rerun-if-changed=C:\Users\vayzer\Desktop\vpnfybot-windows\src\embedded_deps\wireproxy.exe
+cargo:rerun-if-changed=C:\Users\vayzer\Desktop\vpnfybot-windows\src\embedded_deps\WinDivert.dll
+cargo:rerun-if-changed=C:\Users\vayzer\Desktop\vpnfybot-windows\src\embedded_deps\WinDivert64.sys
+Microsoft (R) Windows (R) Resource Compiler Version 10.0.10011.16384
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+cargo:rustc-link-arg-bins=C:\Users\vayzer\Desktop\vpnfybot-windows\src\target\release\build\wg-gui-3367cdf272c26533\out/app.lib
+cargo:warning=Проверка файлов зависимостей для include_bytes!...
+cargo:warning=Найден: ProxyBridgeCore.dll (174592 байт)
+cargo:warning=Найден: ProxyBridge_CLI.exe (6097920 байт)
+cargo:warning=Найден: wireproxy.exe (14987264 байт)
+cargo:warning=Найден: WinDivert.dll (47616 байт)
+cargo:warning=Найден: WinDivert64.sys (94144 байт)
+cargo:warning=Все файлы зависимостей найдены и будут встроены через include_bytes!

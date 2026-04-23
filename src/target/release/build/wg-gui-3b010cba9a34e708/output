@@ -10,7 +10,7 @@ Copyright (C) Microsoft Corporation.  All rights reserved.
 
 cargo:rustc-link-arg-bins=C:\Users\vayzer\Desktop\vpnfybot-windows\src\target\release\build\wg-gui-3b010cba9a34e708\out/app.lib
 cargo:warning=Проверка файлов зависимостей для include_bytes!...
-cargo:warning=Найден: ProxyBridgeCore.dll (174080 байт)
+cargo:warning=Найден: ProxyBridgeCore.dll (174592 байт)
 cargo:warning=Найден: ProxyBridge_CLI.exe (6097920 байт)
 cargo:warning=Найден: wireproxy.exe (14987264 байт)
 cargo:warning=Найден: WinDivert.dll (47616 байт)
