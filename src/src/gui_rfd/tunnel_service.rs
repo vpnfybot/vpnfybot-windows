@@ -825,6 +825,7 @@ pub(super) fn start_proxybridge(processes: &[String], selected_sites: &[String],
     let cache_dir = super::managed_cache_dir();
     let log_path = super::managed_logs_dir().join("proxybridge.log");
     let pid_file = cache_dir.join("proxybridge.pid");
+    let localhost_via_proxy = "True";
 
     let wait_for_start = |timeout_secs: u64| -> Result<(), String> {
         let start = std::time::Instant::now();
@@ -873,6 +874,8 @@ pub(super) fn start_proxybridge(processes: &[String], selected_sites: &[String],
             .arg("socks5://127.0.0.1:1080")
             .arg("--dns-via-proxy")
             .arg("False")
+            .arg("--localhost-via-proxy")
+            .arg(localhost_via_proxy)
             .arg("--verbose")
             .arg("3")
             .stdout(std::process::Stdio::from(log_file))
@@ -904,8 +907,11 @@ pub(super) fn start_proxybridge(processes: &[String], selected_sites: &[String],
     let mut batch = String::new();
     batch.push_str("@echo off\r\n");
     batch.push_str(&format!("cd /d \"{}\"\r\n", cli_exe.parent().unwrap_or(&cache_dir).display()));
-    let mut cmdline = format!("\"{}\" --proxy socks5://127.0.0.1:1080 --dns-via-proxy False --verbose 3",
-                              cli_exe.display());
+    let mut cmdline = format!(
+        "\"{}\" --proxy socks5://127.0.0.1:1080 --dns-via-proxy False --localhost-via-proxy {} --verbose 3",
+        cli_exe.display(),
+        localhost_via_proxy
+    );
     for r in &rules {
         let safe = r.replace('"', "\\\"");
         cmdline.push_str(&format!(" --rule \"{}\"", safe));
