@@ -757,7 +757,12 @@ pub(super) fn format_proxybridge_status(process_count: usize, site_count: usize,
     }
 }
 
-pub(super) fn start_proxybridge(processes: &[String], selected_sites: &[String], selected_apps_only: bool) -> Result<Option<std::process::Child>, String> {
+pub(super) fn start_proxybridge(
+    processes: &[String],
+    selected_sites: &[String],
+    selected_apps_only: bool,
+    wireproxy_info_addr: Option<&str>,
+) -> Result<Option<std::process::Child>, String> {
     use std::fs::OpenOptions;
     #[cfg(target_os = "windows")]
     use std::os::windows::process::CommandExt;
@@ -765,6 +770,13 @@ pub(super) fn start_proxybridge(processes: &[String], selected_sites: &[String],
     if selected_apps_only && processes.is_empty() && selected_sites.is_empty() {
         return Err("Не выбраны процессы для маршрутизации или сайты для VPN".to_string());
     }
+
+    let current_exe = std::env::current_exe()
+        .map_err(|_| "Не удалось определить текущий путь".to_string())?;
+    let current_exe_name = current_exe
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string);
 
     let mut rules: Vec<String> = Vec::new();
     if selected_apps_only {
@@ -809,6 +821,19 @@ pub(super) fn start_proxybridge(processes: &[String], selected_sites: &[String],
         rules.extend(site_rules);
         rules.push("ProxyBridge_CLI.exe:*:*:BOTH:DIRECT".to_string());
         rules.push("wireproxy.exe:*:*:BOTH:DIRECT".to_string());
+
+        if let (Some(process_name), Some(info_addr)) = (current_exe_name.as_deref(), wireproxy_info_addr)
+        {
+            if let Ok(info_socket) = info_addr.parse::<SocketAddr>() {
+                rules.push(format!(
+                    "{}:{}:{}:TCP:DIRECT",
+                    process_name,
+                    info_socket.ip(),
+                    info_socket.port()
+                ));
+            }
+        }
+
         rules.push("*:*:*:BOTH:PROXY".to_string());
     }
 
@@ -817,8 +842,6 @@ pub(super) fn start_proxybridge(processes: &[String], selected_sites: &[String],
 
     let cli_exe = &deps.proxybridge_cli;
 
-    let current_exe = std::env::current_exe()
-        .map_err(|_| "Не удалось определить текущий путь".to_string())?;
     let exe_dir = current_exe.parent()
         .ok_or("Не удалось получить директорию приложения".to_string())?;
 

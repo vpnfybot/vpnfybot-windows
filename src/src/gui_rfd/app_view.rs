@@ -1657,6 +1657,7 @@ impl App for AppState {
                                             &selected_processes,
                                             &selected_sites,
                                             proxy_mode,
+                                            self.wireproxy_info_addr.as_deref(),
                                         ) {
                                             Ok(child_opt) => {
                                                 self.proxybridge_running = true;
@@ -1744,7 +1745,12 @@ impl App for AppState {
                     }
 
                     if self.service_active {
-                        self.apply_pending_tunnel_traffic_samples();
+                        ctx.request_repaint_after(TUNNEL_TRAFFIC_POLL_INTERVAL);
+
+                        if self.apply_pending_tunnel_traffic_samples() {
+                            self.last_time_display_update = None;
+                            is_animating = true;
+                        }
                     }
 
                     let target_traffic_opacity = if self.service_active { 1.0 } else { 0.0 };
