@@ -848,7 +848,7 @@ pub(super) fn start_proxybridge(
     let cache_dir = super::managed_cache_dir();
     let log_path = super::managed_logs_dir().join("proxybridge.log");
     let pid_file = cache_dir.join("proxybridge.pid");
-    let localhost_via_proxy = "True";
+    let localhost_via_proxy = "False";
 
     let wait_for_start = |timeout_secs: u64| -> Result<(), String> {
         let start = std::time::Instant::now();
