@@ -39,7 +39,6 @@ use std::sync::{mpsc::{self, Receiver}, Arc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
-use winrt_notification::Toast;
 use windows::Data::Xml::Dom::XmlDocument;
 use windows::core::{HSTRING, PCWSTR, w};
 use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
@@ -53,7 +52,7 @@ use windows::Win32::Graphics::Gdi::{
     DIB_RGB_COLORS, FillRect, CreateSolidBrush,
     DT_CENTER, DT_SINGLELINE, DT_VCENTER, TRANSPARENT,
 };
-use windows::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP, NIIF_INFO, SetCurrentProcessExplicitAppUserModelID, ShellExecuteW, Shell_NotifyIconW, NOTIFYICONDATAW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY};
+use windows::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP, SetCurrentProcessExplicitAppUserModelID, ShellExecuteW, Shell_NotifyIconW, NOTIFYICONDATAW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE};
 use windows::Win32::UI::WindowsAndMessaging::{
     AdjustWindowRectEx, CallWindowProcW, ChangeWindowMessageFilterEx, CreateIconIndirect, EnumChildWindows, FindWindowW,
     DestroyIcon, SendMessageW,
@@ -159,6 +158,7 @@ impl Language {
                 "Подключен" => "Connected",
                 "Отключен" => "Disconnected",
                 "Туннель подключен" => "Tunnel connected",
+                "Туннель отключен" => "Tunnel disconnected",
                 "Выберите процессы для маршрутизации" => "Select processes for routing",
                 "Запуск ProxyBridge для выбранных процессов" => "Starting ProxyBridge for selected processes",
                 "Запуск ProxyBridge для всей системы через VPN" => "Starting ProxyBridge for entire system via VPN",

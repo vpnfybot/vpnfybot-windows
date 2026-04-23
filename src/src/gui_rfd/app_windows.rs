@@ -1,11 +1,130 @@
 use super::*;
 
+#[cfg(target_os = "windows")]
+use std::mem::ManuallyDrop;
+#[cfg(target_os = "windows")]
+use windows::core::{ComInterface, GUID, HRESULT, PWSTR};
+#[cfg(target_os = "windows")]
+use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
+#[cfg(target_os = "windows")]
+use windows::Win32::System::Com::StructuredStorage::{
+    PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0, PROPVARIANT_0_0_0,
+};
+#[cfg(target_os = "windows")]
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
+    COINIT_APARTMENTTHREADED, VT_LPWSTR,
+};
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::Shell::{PropertiesSystem::IPropertyStore, IShellLinkW};
+
 const TRAY_CALLBACK_MESSAGE: u32 = WM_APP + 1;
 const WM_COPYGLOBALDATA: u32 = 0x0049;
 static mut ORIGINAL_WNDPROC: WNDPROC = None;
 const TRAY_ICON_ID: u32 = 1;
+#[cfg(target_os = "windows")]
+const NOTIFICATION_SHORTCUT_NAME: &str = "vpnfybot-windows.lnk";
+#[cfg(target_os = "windows")]
+const CLSID_SHELL_LINK: GUID = GUID::from_u128(0x00021401_0000_0000_c000_000000000046);
 static DROP_FILE_PATH: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static MINIMIZE_VIA_MINBUTTON: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "windows")]
+fn windows_error(message: impl Into<String>) -> windows::core::Error {
+    windows::core::Error::new(HRESULT(0x80004005u32 as i32), HSTRING::from(message.into()))
+}
+
+#[cfg(target_os = "windows")]
+fn path_to_wide(path: &Path) -> Vec<u16> {
+    path.as_os_str().encode_wide().chain(Some(0)).collect()
+}
+
+#[cfg(target_os = "windows")]
+fn string_propvariant_from_wide(value: &mut [u16]) -> PROPVARIANT {
+    PROPVARIANT {
+        Anonymous: PROPVARIANT_0 {
+            Anonymous: ManuallyDrop::new(PROPVARIANT_0_0 {
+                vt: VT_LPWSTR,
+                wReserved1: 0,
+                wReserved2: 0,
+                wReserved3: 0,
+                Anonymous: PROPVARIANT_0_0_0 {
+                    pwszVal: PWSTR(value.as_mut_ptr()),
+                },
+            }),
+        },
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn start_menu_shortcut_path() -> Option<PathBuf> {
+    let appdata = std::env::var_os("APPDATA")?;
+    Some(
+        PathBuf::from(appdata)
+            .join("Microsoft")
+            .join("Windows")
+            .join("Start Menu")
+            .join("Programs")
+            .join(NOTIFICATION_SHORTCUT_NAME),
+    )
+}
+
+#[cfg(target_os = "windows")]
+pub(super) fn ensure_notification_shortcut_registered() -> windows::core::Result<Option<PathBuf>> {
+    let Some(shortcut_path) = start_menu_shortcut_path() else {
+        return Ok(None);
+    };
+
+    let exe_path = std::env::current_exe()
+        .map_err(|error| windows_error(format!("current_exe failed: {}", error)))?;
+    let exe_dir = exe_path.parent().ok_or_else(|| {
+        windows_error("current_exe returned a path without a parent directory")
+    })?;
+
+    if let Some(parent) = shortcut_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            windows_error(format!("create_dir_all for shortcut directory failed: {}", error))
+        })?;
+    }
+
+    let com_initialized = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok() };
+    let result = (|| -> windows::core::Result<Option<PathBuf>> {
+        let shell_link: IShellLinkW = unsafe {
+            CoCreateInstance(&CLSID_SHELL_LINK, None, CLSCTX_INPROC_SERVER)?
+        };
+
+        let exe_wide = path_to_wide(&exe_path);
+        let exe_dir_wide = path_to_wide(exe_dir);
+        let description_wide = to_wide(WINDOW_TITLE);
+        let mut app_id_wide = to_wide(NOTIFICATION_APP_ID);
+        let app_id_prop = string_propvariant_from_wide(&mut app_id_wide);
+        let shortcut_wide = path_to_wide(&shortcut_path);
+
+        unsafe {
+            shell_link.SetPath(PCWSTR(exe_wide.as_ptr()))?;
+            shell_link.SetWorkingDirectory(PCWSTR(exe_dir_wide.as_ptr()))?;
+            shell_link.SetDescription(PCWSTR(description_wide.as_ptr()))?;
+            shell_link.SetIconLocation(PCWSTR(exe_wide.as_ptr()), 0)?;
+
+            let property_store: IPropertyStore = shell_link.cast()?;
+            property_store.SetValue(&PKEY_AppUserModel_ID, &app_id_prop)?;
+            property_store.Commit()?;
+
+            let persist_file: IPersistFile = shell_link.cast()?;
+            persist_file.Save(PCWSTR(shortcut_wide.as_ptr()), BOOL(1))?;
+        }
+
+        Ok(Some(shortcut_path))
+    })();
+
+    if com_initialized {
+        unsafe {
+            CoUninitialize();
+        }
+    }
+
+    result
+}
 
 #[cfg(target_os = "windows")]
 unsafe fn enable_file_drop_for_window(hwnd: HWND) {
@@ -249,47 +368,12 @@ impl AppState {
         self.tray_icon_added = false;
     }
 
-    #[cfg(target_os = "windows")]
-    pub(super) fn show_tray_balloon_notification(&mut self, message: &str) -> bool {
-        if self.tray_icon.is_none() {
-            self.tray_icon = self.load_tray_icon();
-        }
-
-        if !self.tray_icon_added {
-            if let Some(hwnd) = self.tray_window {
-                self.add_tray_icon(hwnd);
-            }
-        }
-
-        let Some(hwnd) = self.tray_window else {
-            return false;
-        };
-        if !self.tray_icon_added {
-            return false;
-        }
-
-        let mut nid = NOTIFYICONDATAW::default();
-        nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
-        nid.hWnd = hwnd;
-        nid.uID = TRAY_ICON_ID;
-        nid.uFlags = NIF_INFO;
-        if let Some(icon) = self.tray_icon {
-            nid.uFlags |= NIF_ICON;
-            nid.hIcon = icon;
-        }
-        nid.dwInfoFlags = NIIF_INFO;
-        copy_wide_truncated(&mut nid.szInfoTitle, NOTIFICATION_APP_ID);
-        copy_wide_truncated(&mut nid.szInfo, message);
-
-        unsafe { Shell_NotifyIconW(NIM_MODIFY, &nid).as_bool() }
-    }
-
-    pub(super) fn show_windows_notification(&mut self, message: &str) {
-        #[cfg(target_os = "windows")]
-        if self.show_tray_balloon_notification(message) {
-            return;
-        }
-
+    pub(super) fn show_silent_windows_notification(
+        &mut self,
+        title: &str,
+        message: &str,
+        launch: &str,
+    ) {
         let result: windows::core::Result<()> = (|| -> windows::core::Result<()> {
             let toast_xml = XmlDocument::new()?;
             let image_xml = notification_icon_uri()
@@ -301,9 +385,10 @@ impl AppState {
                 })
                 .unwrap_or_default();
             let xml = format!(
-                "<toast duration=\"short\"><visual><binding template=\"ToastGeneric\">{}<text>{}</text><text>{}</text></binding></visual></toast>",
+                "<toast duration=\"short\" launch=\"{}\"><visual><binding template=\"ToastGeneric\">{}<text>{}</text><text>{}</text></binding></visual><audio silent=\"true\"/></toast>",
+                xml_escape(launch),
                 image_xml,
-                xml_escape(NOTIFICATION_APP_ID),
+                xml_escape(title),
                 xml_escape(message),
             );
             let xml_hstring = HSTRING::from(xml);
@@ -311,23 +396,19 @@ impl AppState {
             let toast = ToastNotification::CreateToastNotification(&toast_xml)?;
             let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(
                 NOTIFICATION_APP_ID,
-            ))
-            .or_else(|_| ToastNotificationManager::CreateToastNotifier())
-            .or_else(|_| {
-                ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(
-                    Toast::POWERSHELL_APP_ID,
-                ))
-            })?;
+            ))?;
+
             if let Some(existing) = self.last_notification.take() {
                 let _ = notifier.Hide(&existing);
             }
+
             notifier.Show(&toast)?;
             self.last_notification = Some(toast);
             Ok(())
         })();
 
         if let Err(e) = result {
-            eprintln!("⚠ Не удалось показать Windows-уведомление: {}", e);
+            eprintln!("⚠ Не удалось показать тихое Windows-уведомление: {}", e);
         }
     }
 

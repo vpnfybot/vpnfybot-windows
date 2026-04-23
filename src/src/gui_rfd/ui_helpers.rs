@@ -311,18 +311,6 @@ pub(super) fn to_wide(s: &str) -> Vec<u16> {
     OsStr::new(s).encode_wide().chain(Some(0)).collect()
 }
 
-pub(super) fn copy_wide_truncated(dst: &mut [u16], text: &str) {
-    let wide = to_wide(text);
-    let max_len = dst.len().saturating_sub(1);
-    let copy_len = wide.len().saturating_sub(1).min(max_len);
-    if copy_len > 0 {
-        dst[..copy_len].copy_from_slice(&wide[..copy_len]);
-    }
-    if !dst.is_empty() {
-        dst[copy_len] = 0;
-    }
-}
-
 pub(super) fn mouse_point_from_lparam(lparam: LPARAM) -> (i32, i32) {
     let raw = lparam.0 as u32;
     let x = (raw & 0xffff) as i16 as i32;

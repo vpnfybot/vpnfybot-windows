@@ -520,6 +520,15 @@ pub(crate) fn app_main() -> eframe::Result<()> {
     }
 
     #[cfg(target_os = "windows")]
+    if let Err(error) = super::app_windows::ensure_notification_shortcut_registered() {
+        eprintln!(
+            "⚠ Не удалось зарегистрировать ярлык уведомлений для {}: {}",
+            NOTIFICATION_APP_ID,
+            error
+        );
+    }
+
+    #[cfg(target_os = "windows")]
     configure_process_notification_identity();
 
     setup_firewall_rules();

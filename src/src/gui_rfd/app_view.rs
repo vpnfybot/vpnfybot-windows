@@ -1633,8 +1633,23 @@ impl App for AppState {
                                     self.cached_down_display.push_str("0.00");
                                     self.animated_frame_index = 0;
                                     self.animated_last_frame = Instant::now();
-                                    self.show_windows_notification(
+                                    let notification_conf_name = self
+                                        .conf_path
+                                        .as_deref()
+                                        .map(|conf| {
+                                            Path::new(conf)
+                                                .file_name()
+                                                .and_then(|name| name.to_str())
+                                                .unwrap_or(conf)
+                                                .to_string()
+                                        })
+                                        .unwrap_or_else(|| {
+                                            self.language.translate("Туннель подключен").to_owned()
+                                        });
+                                    self.show_silent_windows_notification(
                                         self.language.translate("Подключен"),
+                                        &notification_conf_name,
+                                        "vpnfybot-windows/connected",
                                     );
                                     let selected_processes = load_selected_processes();
                                     let proxy_mode = load_proxy_mode();
@@ -1730,8 +1745,23 @@ impl App for AppState {
                                 if let Some(ref error_log) = self.error_log {
                                     show_error_dialog(self.language.translate("Ошибка"), error_log);
                                 } else if was_active {
-                                    self.show_windows_notification(
+                                    let notification_conf_name = self
+                                        .conf_path
+                                        .as_deref()
+                                        .map(|conf| {
+                                            Path::new(conf)
+                                                .file_name()
+                                                .and_then(|name| name.to_str())
+                                                .unwrap_or(conf)
+                                                .to_string()
+                                        })
+                                        .unwrap_or_else(|| {
+                                            self.language.translate("Туннель отключен").to_owned()
+                                        });
+                                    self.show_silent_windows_notification(
                                         self.language.translate("Отключен"),
+                                        &notification_conf_name,
+                                        "vpnfybot-windows/disconnected",
                                     );
                                 }
                             }
