@@ -17,6 +17,10 @@ pub(super) fn managed_cache_dir() -> PathBuf {
     ensure_managed_dir(app_dirs::get_cache_dir())
 }
 
+pub(super) fn managed_updates_dir() -> PathBuf {
+    ensure_managed_dir(managed_cache_dir().join("updates"))
+}
+
 fn get_config_storage_path() -> Option<PathBuf> {
     let mut dir = managed_configs_dir();
     dir.push("last_conf.txt");

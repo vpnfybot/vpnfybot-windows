@@ -376,17 +376,22 @@ fn check_single_instance() -> bool {
     true
 }
 
-fn setup_firewall_rules() {
+pub(crate) fn ensure_firewall_rules() -> Result<(), String> {
     if !is_elevated() {
-        return;
+        return Ok(());
     }
 
-    thread::spawn(|| {
-        if let Ok(deps) = embedded_deps_bytes::ExtractedDeps::get() {
-            let wireproxy_path = deps.wireproxy.to_string_lossy().to_string();
-            let proxybridge_path = deps.proxybridge_cli.to_string_lossy().to_string();
+    let deps = embedded_deps_bytes::ExtractedDeps::get()
+        .map_err(|e| format!("Не удалось получить пути к зависимостям для брандмауэра: {}", e))?;
 
-            let script = format!(r#"
+    install_firewall_rules(
+        deps.wireproxy.to_string_lossy().as_ref(),
+        deps.proxybridge_cli.to_string_lossy().as_ref(),
+    )
+}
+
+fn install_firewall_rules(wireproxy_path: &str, proxybridge_path: &str) -> Result<(), String> {
+    let script = format!(r#"
 # Функция для добавления или обновления правила брандмауэра
 function Set-FirewallRule {{
     param(
@@ -410,61 +415,67 @@ function Set-FirewallRule {{
             enable=yes `
             profile=any `
             remoteip=any `
-            description="Разрешение для VPNFy - автоматически добавлено"
+            description="Разрешение для vpnfybot-windows - автоматически добавлено"
 
         if ($LASTEXITCODE -eq 0) {{
             Write-Host "✓ Добавлено правило: $RuleName" -ForegroundColor Green
         }} else {{
             Write-Host "⚠ Ошибка при добавлении правила: $RuleName" -ForegroundColor Yellow
+            exit 1
         }}
-
-        return $true
     }} catch {{
         Write-Host "✗ Исключение при установке правила $($RuleName): $_" -ForegroundColor Red
-        return $false
+        exit 1
     }}
 }}
 
-Set-FirewallRule -RuleName "VPNFy - wireproxy (incoming)" -ProgramPath "{wireproxy_path}"
-Set-FirewallRule -RuleName "VPNFy - ProxyBridge (incoming)" -ProgramPath "{proxybridge_path}"
-
-Write-Host "Готово: правила брандмауэра установлены" -ForegroundColor Cyan
+Set-FirewallRule -RuleName "vpnfybot-windows - wireproxy (incoming)" -ProgramPath "{wireproxy_path}"
+Set-FirewallRule -RuleName "vpnfybot-windows - ProxyBridge (incoming)" -ProgramPath "{proxybridge_path}"
 "#);
 
-            let mut cmd = std::process::Command::new("powershell");
-            cmd.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null());
+    let mut cmd = std::process::Command::new("powershell");
+    cmd.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
 
-            #[cfg(target_os = "windows")]
-            {
-                use std::os::windows::process::CommandExt;
-                const CREATE_NO_WINDOW: u32 = 0x08000000;
-                cmd.creation_flags(CREATE_NO_WINDOW);
-            }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
 
-            match cmd.spawn() {
-                Ok(mut child) => match child.wait() {
-                    Ok(status) => {
-                        if status.success() {
-                            eprintln!("✓ Правила брандмауэра успешно установлены");
-                        } else {
-                            eprintln!(
-                                "⚠ Ошибка при установке правил брандмауэра (код {})",
-                                status.code().unwrap_or(-1)
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("⚠ Ошибка ожидания процесса: {}", e);
-                    }
-                },
-                Err(e) => {
-                    eprintln!("⚠ Не удалось запустить PowerShell для установки правил: {}", e);
-                }
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Не удалось запустить PowerShell для установки правил: {}", e))?;
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("Ошибка ожидания процесса установки правил брандмауэра: {}", e))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Установка правил брандмауэра завершилась с кодом {}",
+            status.code().unwrap_or(-1)
+        ))
+    }
+}
+
+fn setup_firewall_rules() {
+    if !is_elevated() {
+        return;
+    }
+
+    thread::spawn(|| {
+        match ensure_firewall_rules() {
+            Ok(()) => {
+                eprintln!("✓ Правила брандмауэра успешно установлены");
             }
-        } else {
-            eprintln!("⚠ Не удалось получить пути к зависимостям для установки правил");
+            Err(error) => {
+                eprintln!("⚠ Ошибка при установке правил брандмауэра: {}", error);
+            }
         }
     });
 }
@@ -579,6 +590,10 @@ fn run_wireproxy_mode(conf: &OsStr, info_addr: Option<&OsStr>) -> ! {
             std::process::exit(1);
         }
     };
+
+    if let Err(error) = ensure_firewall_rules() {
+        eprintln!("⚠ Не удалось подготовить правила брандмауэра для wireproxy: {}", error);
+    }
 
     let mut command = std::process::Command::new(&deps.wireproxy);
     command

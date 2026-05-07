@@ -253,8 +253,10 @@ impl App for AppState {
                                         .ok()
                                         .and_then(|p| p.parent().map(|pp| pp.to_path_buf()))
                                         .unwrap_or_else(|| {
-                                            std::env::current_dir().unwrap_or(std::env::temp_dir())
+                                            std::env::current_dir()
+                                                .unwrap_or_else(|_| managed_cache_dir())
                                         });
+                                    let updates_dir = managed_updates_dir();
 
                                     let asset_stem = std::path::Path::new(&fname)
                                         .file_stem()
@@ -287,7 +289,7 @@ impl App for AppState {
                                     };
 
                                     let download_path = if replace_candidate {
-                                        std::env::temp_dir().join(&downloaded_basename)
+                                        updates_dir.join(&downloaded_basename)
                                     } else {
                                         exe_dir.join(&downloaded_basename)
                                     };
@@ -363,8 +365,7 @@ impl App for AppState {
                                                             .map(|d| d.as_millis())
                                                             .unwrap_or(0u128)
                                                     );
-                                                    let script_path =
-                                                        std::env::temp_dir().join(&script_name);
+                                                    let script_path = updates_dir.join(&script_name);
                                                     let src = downloaded_path
                                                         .display()
                                                         .to_string()

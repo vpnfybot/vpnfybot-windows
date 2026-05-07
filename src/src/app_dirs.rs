@@ -71,7 +71,7 @@ impl AppDirs {
         if !info_file.exists() {
             // Use compile-time package version so app.info reflects Cargo.toml
             let info = format!(
-                "@vpnfybot-windows Application\n\
+                "vpnfybot-windows Application\n\
                  Version: {}\n\
                  Created: {}\n\
                  Install Root: {}\n",
@@ -90,13 +90,17 @@ impl AppDirs {
     }
 
     /// Полностью сбросить временные runtime-файлы при старте приложения.
-    /// Конфиги пользователя не затрагиваются.
+    /// Конфиги пользователя и установленные зависимости не затрагиваются.
     pub fn reset_runtime_state(&self) -> Result<(), Box<dyn Error>> {
-        for dir in [&self.logs, &self.permissions, &self.cache, &self.deps] {
+        for dir in [&self.logs, &self.permissions, &self.cache] {
             if dir.exists() {
                 fs::remove_dir_all(dir)?;
             }
             fs::create_dir_all(dir)?;
+        }
+
+        if !self.deps.exists() {
+            fs::create_dir_all(&self.deps)?;
         }
 
         self.remove_legacy_readmes()?;
@@ -131,6 +135,13 @@ impl AppDirs {
     fn cleanup_global_temp_artifacts(&self) -> Result<u32, Box<dyn Error>> {
         let mut deleted_count = 0;
         let temp_dir = env::temp_dir();
+        let legacy_root = temp_dir.join("vpnfybot-windows");
+
+        if legacy_root != self.root && legacy_root.exists() {
+            if fs::remove_dir_all(&legacy_root).is_ok() {
+                deleted_count += 1;
+            }
+        }
 
         if let Ok(entries) = fs::read_dir(temp_dir) {
             for entry in entries {
@@ -177,13 +188,10 @@ impl AppDirs {
 
 /// Получить корневую папку приложения
 fn get_app_root() -> PathBuf {
-    // Store all application folders (logs, configs, cache, deps) inside
-    // the system/user temporary directory to avoid touching installation
-    // location. This uses `env::temp_dir()` which on Windows typically
-    // resolves to `C:\Users\<user>\AppData\Local\Temp`.
-    let mut temp_root = env::temp_dir();
-    temp_root.push("vpnfybot-windows");
-    temp_root
+    env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|dir| dir.to_path_buf()))
+        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
 /// Получить путь к приложению

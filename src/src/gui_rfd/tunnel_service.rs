@@ -451,6 +451,12 @@ pub(super) fn create_and_start_service(conf: &str) -> ServiceResult {
         }
     };
 
+    if super::is_elevated() {
+        if let Err(error) = super::app_runtime::ensure_firewall_rules() {
+            log::warn!("Не удалось установить правила брандмауэра перед запуском wireproxy: {}", error);
+        }
+    }
+
     if !super::is_elevated() {
         let launch_result = super::app_runtime::launch_self_elevated(&[
             OsString::from("/service"),

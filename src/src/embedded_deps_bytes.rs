@@ -65,7 +65,7 @@ static EXTRACTED_DEPS_CACHE: OnceLock<Mutex<Option<ExtractedDeps>>> = OnceLock::
 
 /// Получить путь к директории для извлеченных зависимостей
 pub fn embedded_deps_dir() -> PathBuf {
-    app_dirs::get_deps_dir().join("@vpnfybot-windows")
+    app_dirs::get_deps_dir().join("vpnfybot-windows")
 }
 
 fn embedded_dep_matches(path: &PathBuf, expected_size: usize) -> bool {

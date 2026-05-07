@@ -56,9 +56,20 @@ Built on top of:
 ## 📦 Installation
 
 1. Download the latest release from GitHub  
-2. Run the `.exe` file  
+2. Run the installer `.exe` file  
 3. Import your configuration  
 4. Done ✅
+
+---
+
+## 🛠 Build installer
+
+Run `src\build-installer-release.bat` to produce `src\dist\vpnfybot-windows.exe`.
+
+The installer:
+- installs the app into the current user's local Programs directory
+- keeps logs, cache, configs, updater files, and extracted dependencies inside the installed app folder
+- preinstalls `wireproxy.exe` and `ProxyBridge_CLI.exe` into a stable `deps` path and adds Windows Firewall rules for them
 
 ---
 
