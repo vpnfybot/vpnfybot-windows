@@ -20,7 +20,7 @@ if not exist "%DIST_DIR%" mkdir "%DIST_DIR%"
 if exist "%BUILD_OUTPUT_FILE%" del /Q "%BUILD_OUTPUT_FILE%"
 if exist "%LEGACY_PAYLOAD_DIR%" rmdir /S /Q "%LEGACY_PAYLOAD_DIR%"
 if exist "%PAYLOAD_DIR%" rmdir /S /Q "%PAYLOAD_DIR%"
-mkdir "%PAYLOAD_DIR%\deps\vpnfybot-windows"
+mkdir "%PAYLOAD_DIR%\deps\vpnfybot-windows-%PRODUCT_VERSION%"
 if errorlevel 1 exit /b %errorlevel%
 
 copy /Y "target\release\vpnfybot-windows.exe" "%PAYLOAD_DIR%\vpnfybot-windows.exe"
@@ -29,7 +29,7 @@ copy /Y "vpnfy.ico" "%PAYLOAD_DIR%\vpnfy.ico"
 if errorlevel 1 exit /b %errorlevel%
 
 for %%F in (ProxyBridgeCore.dll ProxyBridge_CLI.exe WinDivert.dll WinDivert64.sys wireproxy.exe) do (
-  copy /Y "embedded_deps\%%F" "%PAYLOAD_DIR%\deps\vpnfybot-windows\%%F"
+  copy /Y "embedded_deps\%%F" "%PAYLOAD_DIR%\deps\vpnfybot-windows-%PRODUCT_VERSION%\%%F"
   if errorlevel 1 exit /b %errorlevel%
 )
 

@@ -16,6 +16,7 @@
 !define PRODUCT_WEB_SITE "https://github.com/vpnfybot/vpnfybot-windows"
 !define PRODUCT_EXE "vpnfybot-windows.exe"
 !define PRODUCT_DIR "vpnfybot-windows"
+!define PRODUCT_DEPS_DIR "vpnfybot-windows-${PRODUCT_VERSION}"
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\vpnfybot-windows"
 !define FIREWALL_RULE_WIREPROXY "vpnfybot-windows - wireproxy (incoming)"
 !define FIREWALL_RULE_PROXYBRIDGE "vpnfybot-windows - ProxyBridge (incoming)"
@@ -75,33 +76,6 @@ Function StopTunnelProcesses
   Sleep 1000
 FunctionEnd
 
-Function RemoveInstalledDepsWithRetry
-  StrCpy $1 0
-
-remove_installed_deps_retry:
-  Delete "$INSTDIR\deps\vpnfybot-windows\ProxyBridgeCore.dll"
-  Delete "$INSTDIR\deps\vpnfybot-windows\ProxyBridge_CLI.exe"
-  Delete "$INSTDIR\deps\vpnfybot-windows\WinDivert.dll"
-  Delete "$INSTDIR\deps\vpnfybot-windows\WinDivert64.sys"
-  Delete "$INSTDIR\deps\vpnfybot-windows\wireproxy.exe"
-  RMDir /r "$INSTDIR\deps"
-
-  IfFileExists "$INSTDIR\deps\vpnfybot-windows\WinDivert64.sys" remove_installed_deps_wait 0
-  Return
-
-remove_installed_deps_wait:
-  IntOp $1 $1 + 1
-  IntCmp $1 ${DEPS_UNLOCK_RETRY_COUNT} remove_installed_deps_failed remove_installed_deps_sleep remove_installed_deps_failed
-
-remove_installed_deps_sleep:
-  Sleep ${DEPS_UNLOCK_RETRY_DELAY_MS}
-  Goto remove_installed_deps_retry
-
-remove_installed_deps_failed:
-  MessageBox MB_ICONSTOP|MB_OK "Failed to update WinDivert64.sys because it is still in use. Close vpnfybot-windows and stop the VPN connection, then retry the installation."
-  Abort
-FunctionEnd
-
 Function un.StopTunnelProcesses
   DetailPrint "Stopping running tunnel components..."
   !insertmacro RunHidden '"$SYSDIR\taskkill.exe" /IM "vpnfybot-windows.exe" /F /T'
@@ -116,14 +90,14 @@ Function un.RemoveInstalledDepsWithRetry
   StrCpy $1 0
 
 un_remove_installed_deps_retry:
-  Delete "$INSTDIR\deps\vpnfybot-windows\ProxyBridgeCore.dll"
-  Delete "$INSTDIR\deps\vpnfybot-windows\ProxyBridge_CLI.exe"
-  Delete "$INSTDIR\deps\vpnfybot-windows\WinDivert.dll"
-  Delete "$INSTDIR\deps\vpnfybot-windows\WinDivert64.sys"
-  Delete "$INSTDIR\deps\vpnfybot-windows\wireproxy.exe"
-  RMDir /r "$INSTDIR\deps"
+  Delete "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\ProxyBridgeCore.dll"
+  Delete "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\ProxyBridge_CLI.exe"
+  Delete "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\WinDivert.dll"
+  Delete "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\WinDivert64.sys"
+  Delete "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\wireproxy.exe"
+  RMDir /r "$INSTDIR\deps\${PRODUCT_DEPS_DIR}"
 
-  IfFileExists "$INSTDIR\deps\vpnfybot-windows\WinDivert64.sys" un_remove_installed_deps_wait 0
+  IfFileExists "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\WinDivert64.sys" un_remove_installed_deps_wait 0
   Return
 
 un_remove_installed_deps_wait:
@@ -135,8 +109,15 @@ un_remove_installed_deps_sleep:
   Goto un_remove_installed_deps_retry
 
 un_remove_installed_deps_failed:
-  MessageBox MB_ICONSTOP|MB_OK "Failed to remove WinDivert64.sys because it is still in use. Close vpnfybot-windows and stop the VPN connection, then retry the uninstall."
-  Abort
+  Delete /REBOOTOK "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\ProxyBridgeCore.dll"
+  Delete /REBOOTOK "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\ProxyBridge_CLI.exe"
+  Delete /REBOOTOK "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\WinDivert.dll"
+  Delete /REBOOTOK "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\WinDivert64.sys"
+  Delete /REBOOTOK "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\wireproxy.exe"
+  RMDir /r /REBOOTOK "$INSTDIR\deps\${PRODUCT_DEPS_DIR}"
+  SetRebootFlag true
+  DetailPrint "WinDivert64.sys is still loaded; dependency cleanup was scheduled for the next reboot."
+  Return
 FunctionEnd
 
 Section "Install" SEC01
@@ -144,20 +125,25 @@ Section "Install" SEC01
   SetOverwrite on
 
   Call StopTunnelProcesses
-  Call RemoveInstalledDepsWithRetry
 
   SetOutPath "$INSTDIR"
 
   File "${PAYLOAD_DIR}\${PRODUCT_EXE}"
   File "${PAYLOAD_DIR}\vpnfy.ico"
 
-  RMDir /r "$INSTDIR\deps"
-  SetOutPath "$INSTDIR\deps\vpnfybot-windows"
-  File "${PAYLOAD_DIR}\deps\vpnfybot-windows\ProxyBridgeCore.dll"
-  File "${PAYLOAD_DIR}\deps\vpnfybot-windows\ProxyBridge_CLI.exe"
-  File "${PAYLOAD_DIR}\deps\vpnfybot-windows\WinDivert.dll"
-  File "${PAYLOAD_DIR}\deps\vpnfybot-windows\WinDivert64.sys"
-  File "${PAYLOAD_DIR}\deps\vpnfybot-windows\wireproxy.exe"
+  IfFileExists "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\wireproxy.exe" 0 copy_current_deps
+  IfFileExists "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\ProxyBridge_CLI.exe" 0 copy_current_deps
+  IfFileExists "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\WinDivert64.sys" install_deps_ready copy_current_deps
+
+copy_current_deps:
+  SetOutPath "$INSTDIR\deps\${PRODUCT_DEPS_DIR}"
+  File "${PAYLOAD_DIR}\deps\${PRODUCT_DEPS_DIR}\ProxyBridgeCore.dll"
+  File "${PAYLOAD_DIR}\deps\${PRODUCT_DEPS_DIR}\ProxyBridge_CLI.exe"
+  File "${PAYLOAD_DIR}\deps\${PRODUCT_DEPS_DIR}\WinDivert.dll"
+  File "${PAYLOAD_DIR}\deps\${PRODUCT_DEPS_DIR}\WinDivert64.sys"
+  File "${PAYLOAD_DIR}\deps\${PRODUCT_DEPS_DIR}\wireproxy.exe"
+
+install_deps_ready:
 
   SetOutPath "$INSTDIR"
   CreateDirectory "$INSTDIR\logs"
@@ -171,9 +157,9 @@ Section "Install" SEC01
   CreateShortCut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXE}" "" "$INSTDIR\vpnfy.ico"
 
   !insertmacro RunHidden '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="${FIREWALL_RULE_WIREPROXY}"'
-  !insertmacro RunHidden '"$SYSDIR\netsh.exe" advfirewall firewall add rule name="${FIREWALL_RULE_WIREPROXY}" dir=in action=allow program="$INSTDIR\deps\vpnfybot-windows\wireproxy.exe" enable=yes profile=any remoteip=any description="${FIREWALL_RULE_DESCRIPTION}"'
+  !insertmacro RunHidden '"$SYSDIR\netsh.exe" advfirewall firewall add rule name="${FIREWALL_RULE_WIREPROXY}" dir=in action=allow program="$INSTDIR\deps\${PRODUCT_DEPS_DIR}\wireproxy.exe" enable=yes profile=any remoteip=any description="${FIREWALL_RULE_DESCRIPTION}"'
   !insertmacro RunHidden '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="${FIREWALL_RULE_PROXYBRIDGE}"'
-  !insertmacro RunHidden '"$SYSDIR\netsh.exe" advfirewall firewall add rule name="${FIREWALL_RULE_PROXYBRIDGE}" dir=in action=allow program="$INSTDIR\deps\vpnfybot-windows\ProxyBridge_CLI.exe" enable=yes profile=any remoteip=any description="${FIREWALL_RULE_DESCRIPTION}"'
+  !insertmacro RunHidden '"$SYSDIR\netsh.exe" advfirewall firewall add rule name="${FIREWALL_RULE_PROXYBRIDGE}" dir=in action=allow program="$INSTDIR\deps\${PRODUCT_DEPS_DIR}\ProxyBridge_CLI.exe" enable=yes profile=any remoteip=any description="${FIREWALL_RULE_DESCRIPTION}"'
 SectionEnd
 
 Section -Post
@@ -203,12 +189,14 @@ Section "Uninstall"
   Delete "$INSTDIR\${PRODUCT_EXE}"
   Delete "$INSTDIR\vpnfy.ico"
   Delete "$INSTDIR\uninstall.exe"
-  RMDir /r "$INSTDIR\deps"
+  Delete "$INSTDIR\app.info"
+  Delete /REBOOTOK "$INSTDIR\app.info"
+  RMDir /r /REBOOTOK "$INSTDIR\deps"
   RMDir /r "$INSTDIR\logs"
   RMDir /r "$INSTDIR\permissions"
   RMDir /r "$INSTDIR\configs"
   RMDir /r "$INSTDIR\cache"
-  RMDir "$INSTDIR"
+  RMDir /REBOOTOK "$INSTDIR"
 
   DeleteRegKey HKCU "${PRODUCT_UNINST_KEY}"
   SetAutoClose true

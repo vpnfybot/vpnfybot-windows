@@ -10,6 +10,8 @@ use super::app_dirs;
 
 include!(concat!(env!("OUT_DIR"), "/embedded_deps_manifest.rs"));
 
+const EMBEDDED_DEPS_DIR_NAME: &str = concat!("vpnfybot-windows-", env!("CARGO_PKG_VERSION"));
+
 pub struct EmbeddedDep {
     pub file_name: &'static str,
     pub compressed: &'static [u8],
@@ -65,7 +67,7 @@ static EXTRACTED_DEPS_CACHE: OnceLock<Mutex<Option<ExtractedDeps>>> = OnceLock::
 
 /// Получить путь к директории для извлеченных зависимостей
 pub fn embedded_deps_dir() -> PathBuf {
-    app_dirs::get_deps_dir().join("vpnfybot-windows")
+    app_dirs::get_deps_dir().join(EMBEDDED_DEPS_DIR_NAME)
 }
 
 fn embedded_dep_matches(path: &PathBuf, expected_size: usize) -> bool {
