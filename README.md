@@ -62,17 +62,6 @@ Built on top of:
 
 ---
 
-## 🛠 Build installer
-
-Run `src\build-installer-release.bat` to produce `src\dist\vpnfybot-windows.exe`.
-
-The installer:
-- installs the app into the current user's local Programs directory
-- keeps logs, cache, configs, updater files, and extracted dependencies inside the installed app folder
-- preinstalls `wireproxy.exe` and `ProxyBridge_CLI.exe` into a stable `deps` path and adds Windows Firewall rules for them
-
----
-
 ## ⚠️ Notes
 
 - Some applications or websites may behave unexpectedly due to OS/network limitations  
