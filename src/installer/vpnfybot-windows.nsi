@@ -21,8 +21,11 @@
 !define FIREWALL_RULE_WIREPROXY "vpnfybot-windows - wireproxy (incoming)"
 !define FIREWALL_RULE_PROXYBRIDGE "vpnfybot-windows - ProxyBridge (incoming)"
 !define FIREWALL_RULE_DESCRIPTION "vpnfybot-windows firewall rule"
+!define SUBSCRIPTION_TASK_NAME "vpnfybot-windows-subscription-check"
 !define DEPS_UNLOCK_RETRY_COUNT 20
 !define DEPS_UNLOCK_RETRY_DELAY_MS 500
+!define APP_UNLOCK_RETRY_COUNT 40
+!define APP_UNLOCK_RETRY_DELAY_MS 500
 
 Unicode True
 RequestExecutionLevel admin
@@ -61,6 +64,21 @@ VIAddVersionKey "FileVersion" "${PRODUCT_VERSION}"
 !insertmacro MUI_LANGUAGE "English"
 !insertmacro MUI_LANGUAGE "Russian"
 
+Function .onInit
+  SetShellVarContext current
+  IfFileExists "$EXEDIR\uninstall.exe" 0 on_init_done
+  StrCmp "$EXEPATH" "$EXEDIR\${PRODUCT_EXE}" 0 on_init_done
+
+  StrCpy $0 "$TEMP\${PRODUCT_NAME}-installer-relay.exe"
+  Delete "$0"
+  CopyFiles /SILENT "$EXEPATH" "$0"
+  IfFileExists "$0" 0 on_init_done
+  Exec '"$0"'
+  Quit
+
+on_init_done:
+FunctionEnd
+
 !macro RunHidden COMMAND
   nsExec::Exec ${COMMAND}
   Pop $0
@@ -68,6 +86,8 @@ VIAddVersionKey "FileVersion" "${PRODUCT_VERSION}"
 
 Function StopTunnelProcesses
   DetailPrint "Stopping running tunnel components..."
+  !insertmacro RunHidden '"$SYSDIR\schtasks.exe" /End /TN "${SUBSCRIPTION_TASK_NAME}"'
+  !insertmacro RunHidden '"$SYSDIR\schtasks.exe" /Delete /TN "${SUBSCRIPTION_TASK_NAME}" /F'
   !insertmacro RunHidden '"$SYSDIR\taskkill.exe" /IM "vpnfybot-windows.exe" /F /T'
   !insertmacro RunHidden '"$SYSDIR\taskkill.exe" /IM "wireproxy.exe" /F /T'
   !insertmacro RunHidden '"$SYSDIR\taskkill.exe" /IM "ProxyBridge_CLI.exe" /F /T'
@@ -78,12 +98,38 @@ FunctionEnd
 
 Function un.StopTunnelProcesses
   DetailPrint "Stopping running tunnel components..."
+  !insertmacro RunHidden '"$SYSDIR\schtasks.exe" /End /TN "${SUBSCRIPTION_TASK_NAME}"'
+  !insertmacro RunHidden '"$SYSDIR\schtasks.exe" /Delete /TN "${SUBSCRIPTION_TASK_NAME}" /F'
   !insertmacro RunHidden '"$SYSDIR\taskkill.exe" /IM "vpnfybot-windows.exe" /F /T'
   !insertmacro RunHidden '"$SYSDIR\taskkill.exe" /IM "wireproxy.exe" /F /T'
   !insertmacro RunHidden '"$SYSDIR\taskkill.exe" /IM "ProxyBridge_CLI.exe" /F /T'
   !insertmacro RunHidden '"$SYSDIR\sc.exe" stop "WinDivert"'
   !insertmacro RunHidden '"$SYSDIR\sc.exe" delete "WinDivert"'
   Sleep 1000
+FunctionEnd
+
+Function WaitForInstalledAppUnlock
+  StrCpy $1 0
+
+wait_installed_app_unlock_retry:
+  Delete "$INSTDIR\${PRODUCT_EXE}"
+  IfFileExists "$INSTDIR\${PRODUCT_EXE}" wait_installed_app_unlock_wait wait_installed_app_unlock_ready
+
+wait_installed_app_unlock_wait:
+  IntOp $1 $1 + 1
+  IntCmp $1 ${APP_UNLOCK_RETRY_COUNT} wait_installed_app_unlock_failed wait_installed_app_unlock_sleep wait_installed_app_unlock_failed
+
+wait_installed_app_unlock_sleep:
+  !insertmacro RunHidden '"$SYSDIR\taskkill.exe" /IM "vpnfybot-windows.exe" /F /T'
+  Sleep ${APP_UNLOCK_RETRY_DELAY_MS}
+  Goto wait_installed_app_unlock_retry
+
+wait_installed_app_unlock_failed:
+  MessageBox MB_ICONSTOP|MB_OK "Unable to replace ${PRODUCT_EXE}. Close vpnfybot-windows and try again."
+  Abort
+
+wait_installed_app_unlock_ready:
+  Return
 FunctionEnd
 
 Function un.RemoveInstalledDepsWithRetry
@@ -127,6 +173,7 @@ Section "Install" SEC01
   Call StopTunnelProcesses
 
   SetOutPath "$INSTDIR"
+  Call WaitForInstalledAppUnlock
 
   File "${PAYLOAD_DIR}\${PRODUCT_EXE}"
   File "${PAYLOAD_DIR}\vpnfy.ico"

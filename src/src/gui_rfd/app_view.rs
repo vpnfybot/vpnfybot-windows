@@ -7,6 +7,16 @@ impl App for AppState {
             self.reset_app_settings();
         }
 
+        if self.apply_pending_subscription_info() {
+            self.last_time_display_update = None;
+        } else if self.subscription_info_rx.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(250));
+        }
+        if self.subscription_expires_at_unix.is_some() {
+            self.maybe_notify_subscription_expiry();
+            ctx.request_repaint_after(Duration::from_secs(60));
+        }
+
         #[cfg(target_os = "windows")]
         {
             if !self.window_frame_styled && self.window_frame_attempts < 10 {
@@ -335,6 +345,10 @@ impl App for AppState {
                                         {
                                             let downloaded_path = download_path.clone();
                                             if let Ok(current_exe) = std::env::current_exe() {
+                                                let installed_mode = current_exe
+                                                    .parent()
+                                                    .map(|dir| dir.join("uninstall.exe").exists())
+                                                    .unwrap_or(false);
                                                 let current_name = current_exe
                                                     .file_name()
                                                     .and_then(|n| n.to_str())
@@ -355,7 +369,69 @@ impl App for AppState {
                                                     || cur_no_ext.contains(&fname_no_ext)
                                                     || fname_no_ext.contains(&cur_no_ext);
 
-                                                if replace_candidate_after {
+                                                if installed_mode {
+                                                    let script_name = format!(
+                                                        "vpnfy_update_{}.ps1",
+                                                        std::time::SystemTime::now()
+                                                            .duration_since(
+                                                                std::time::UNIX_EPOCH,
+                                                            )
+                                                            .map(|d| d.as_millis())
+                                                            .unwrap_or(0u128)
+                                                    );
+                                                    let script_path = updates_dir.join(&script_name);
+                                                    let installer = downloaded_path
+                                                        .display()
+                                                        .to_string()
+                                                        .replace("'", "''");
+                                                    let procname = cur_no_ext.replace("'", "''");
+                                                    let script = format!(
+                                                        r#"$installer = '{installer}'
+    $proc = '{proc}'
+    Start-Sleep -Milliseconds 500
+    $tries = 0
+    while (Get-Process -Name $proc -ErrorAction SilentlyContinue) {{
+        Start-Sleep -Seconds 1
+        $tries += 1
+        if ($tries -gt 120) {{ exit 1 }}
+    }}
+    Start-Process -FilePath $installer
+    Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
+    exit 0
+    "#,
+                                                        installer = installer,
+                                                        proc = procname
+                                                    );
+
+                                                    let _ = std::fs::write(
+                                                        &script_path,
+                                                        script.as_bytes(),
+                                                    );
+
+                                                    use std::os::windows::process::CommandExt;
+                                                    const CREATE_NO_WINDOW: u32 = 0x08000000;
+                                                    let mut cmd =
+                                                        std::process::Command::new("powershell");
+                                                    cmd.args([
+                                                        "-NoProfile",
+                                                        "-ExecutionPolicy",
+                                                        "Bypass",
+                                                        "-File",
+                                                        script_path
+                                                            .to_str()
+                                                            .unwrap_or_default(),
+                                                    ]);
+                                                    cmd.creation_flags(CREATE_NO_WINDOW);
+                                                    if cmd.spawn().is_ok() {
+                                                        std::process::exit(0);
+                                                    } else {
+                                                        let _ = std::process::Command::new(
+                                                            &downloaded_path,
+                                                        )
+                                                        .spawn();
+                                                        std::process::exit(0);
+                                                    }
+                                                } else if replace_candidate_after {
                                                     let script_name = format!(
                                                         "vpnfy_update_{}.ps1",
                                                         std::time::SystemTime::now()
@@ -1083,9 +1159,7 @@ impl App for AppState {
                             .pick_file()
                         {
                             let selected_path = path.display().to_string();
-                            self.conf_path = Some(selected_path.clone());
-                            self.error_log = None;
-                            save_conf_path(self.conf_path.as_ref().unwrap());
+                            self.set_imported_conf_path(selected_path);
                         }
                     }
 
@@ -1292,14 +1366,7 @@ impl App for AppState {
                         .last_time_display_update
                         .map_or(true, |t| t.elapsed() >= Duration::from_secs(1))
                     {
-                        let mb = self.session_traffic_bytes as f64 / 1024.0 / 1024.0;
-                        let traffic_text = if mb > 1000.0 {
-                            format!("{:.2} GB", mb / 1024.0)
-                        } else {
-                            format!("{:.2} MB", mb)
-                        };
-                        self.cached_time_display =
-                            format!("{} / {}", self.format_connection_time(), traffic_text);
+                        self.cached_time_display = self.format_center_status_text();
 
                         let up_mbps = self.last_upload_bps / 1024.0 / 1024.0;
                         let down_mbps = self.last_download_bps / 1024.0 / 1024.0;

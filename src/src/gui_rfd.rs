@@ -101,6 +101,16 @@ struct TunnelTrafficSample {
     captured_at: Instant,
 }
 
+struct SubscriptionInfo {
+    expires_at_unix: i64,
+    display_date: String,
+}
+
+struct SubscriptionInfoPayload {
+    host: String,
+    private_key: String,
+}
+
 const APP_TITLE: &str = "vpnfybot-windows";
 const WINDOW_TITLE: &str = "vpnfybot-windows";
 const NOTIFICATION_APP_ID: &str = "vpnfybot-windows";
@@ -187,6 +197,11 @@ impl Language {
                 "Проверка обновлений" => "Checking for updates",
                 "Установить" => "Install",
                 "Позже" => "Later",
+                "Активна до: {}" => "Active until: {}",
+                "Подписка истекает через 72 часа❗️" => "Subscription expires in 72 hours❗️",
+                "Подписка истекает через 48 часов❗️" => "Subscription expires in 48 hours❗️",
+                "Подписка истекает через 24 часа❗️" => "Subscription expires in 24 hours❗️",
+                "Подписка истекла❗️" => "Subscription expired❗️",
                 _ => key,
             },
             Language::Ru => key,
@@ -199,6 +214,7 @@ struct AppState {
     status: String,
     error_log: Option<String>,
     status_rx: Option<Receiver<ServiceResult>>,
+    subscription_info_rx: Option<Receiver<Option<SubscriptionInfo>>>,
     service_running: bool,
     service_active: bool,
     session_traffic_bytes: u64,
@@ -213,6 +229,10 @@ struct AppState {
     last_time_display_update: Option<Instant>,
     // Cached string for the central time/traffic display (updated once per second)
     cached_time_display: String,
+    subscription_for_date_display: Option<String>,
+    subscription_expires_at_unix: Option<i64>,
+    subscription_notification_mask: u8,
+    last_subscription_notification_check: Option<Instant>,
     // Cached strings for upload/download numeric displays (updated together with `cached_time_display`)
     cached_up_display: String,
     cached_down_display: String,

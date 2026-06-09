@@ -1,5 +1,21 @@
 use super::*;
 
+const SUBSCRIPTION_NOTIFY_72_HOURS: u8 = 1 << 0;
+const SUBSCRIPTION_NOTIFY_48_HOURS: u8 = 1 << 1;
+const SUBSCRIPTION_NOTIFY_24_HOURS: u8 = 1 << 2;
+const SUBSCRIPTION_NOTIFY_EXPIRED: u8 = 1 << 3;
+const SUBSCRIPTION_CHECK_INTERVAL: Duration = Duration::from_secs(60);
+const SUBSCRIPTION_SCHEDULED_TASK_NAME: &str = "vpnfybot-windows-subscription-check";
+const SUBSCRIPTION_SCHEDULED_TASK_ARG: &str = "/subscription-check";
+
+#[derive(Clone, Copy)]
+enum SubscriptionNotificationKind {
+    Warning72Hours,
+    Warning48Hours,
+    Warning24Hours,
+    Expired,
+}
+
 impl Default for AppState {
     fn default() -> Self {
         let conf_path = load_saved_conf_path();
@@ -9,11 +25,12 @@ impl Default for AppState {
         let proxy_mode_toggle = load_proxy_mode();
         let language = load_language();
 
-        let s = Self {
+        let mut s = Self {
             conf_path,
             status,
             error_log: None,
             status_rx: None,
+            subscription_info_rx: None,
             service_running: false,
             service_active: false,
             session_traffic_bytes: 0,
@@ -27,6 +44,10 @@ impl Default for AppState {
             last_tunnel_totals: None,
             last_time_display_update: None,
             cached_time_display: String::new(),
+            subscription_for_date_display: None,
+            subscription_expires_at_unix: None,
+            subscription_notification_mask: 0,
+            last_subscription_notification_check: None,
             cached_up_display: "0.00".to_string(),
             cached_down_display: "0.00".to_string(),
             last_upload_bps: 0.0,
@@ -73,11 +94,90 @@ impl Default for AppState {
             button_hfont_light: create_button_ui_font_light(),
         };
         update_check::spawn_update_check_thread();
+        sync_subscription_check_task(s.conf_path.as_deref());
+        s.spawn_subscription_info_refresh();
         s
     }
 }
 
 impl AppState {
+    pub(super) fn set_imported_conf_path(&mut self, path: String) {
+        self.conf_path = Some(path);
+        self.error_log = None;
+        save_conf_path(self.conf_path.as_ref().unwrap());
+        clear_subscription_notification_state();
+        sync_subscription_check_task(self.conf_path.as_deref());
+        self.status.clear();
+        self.reset_subscription_info_display();
+        self.spawn_subscription_info_refresh();
+    }
+
+    pub(super) fn reset_subscription_info_display(&mut self) {
+        self.subscription_info_rx = None;
+        self.subscription_for_date_display = None;
+        self.subscription_expires_at_unix = None;
+        self.subscription_notification_mask = 0;
+        self.last_subscription_notification_check = None;
+        self.last_time_display_update = None;
+        self.cached_time_display.clear();
+    }
+
+    pub(super) fn spawn_subscription_info_refresh(&mut self) {
+        self.subscription_info_rx = None;
+
+        let Some(conf_path) = self.conf_path.clone() else {
+            return;
+        };
+
+        let (tx, rx) = mpsc::channel();
+        self.subscription_info_rx = Some(rx);
+
+        thread::spawn(move || {
+            let info = fetch_subscription_info(&conf_path);
+            let _ = tx.send(info);
+        });
+    }
+
+    pub(super) fn apply_pending_subscription_info(&mut self) -> bool {
+        let recv_result = match self.subscription_info_rx.as_ref() {
+            Some(rx) => rx.try_recv(),
+            None => return false,
+        };
+
+        match recv_result {
+            Ok(info) => {
+                if let Some(info) = info {
+                    self.subscription_for_date_display = Some(info.display_date);
+                    self.subscription_expires_at_unix = Some(info.expires_at_unix);
+                    self.subscription_notification_mask = load_subscription_notification_state()
+                        .and_then(|(expires_at_unix, notification_mask)| {
+                            (expires_at_unix == info.expires_at_unix).then_some(notification_mask)
+                        })
+                        .unwrap_or(0);
+                    save_subscription_notification_state(
+                        info.expires_at_unix,
+                        self.subscription_notification_mask,
+                    );
+                } else {
+                    self.subscription_for_date_display = None;
+                    self.subscription_expires_at_unix = None;
+                    self.subscription_notification_mask = 0;
+                    clear_subscription_notification_state();
+                }
+                self.subscription_info_rx = None;
+                self.last_subscription_notification_check = None;
+                self.last_time_display_update = None;
+                self.cached_time_display.clear();
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.subscription_info_rx = None;
+                false
+            }
+        }
+    }
+
     #[allow(dead_code)]
     pub(super) fn get_tunnel_total_bytes(&self) -> Option<u64> {
         let info_addr = self.wireproxy_info_addr.as_deref()?;
@@ -209,6 +309,76 @@ impl AppState {
         }
     }
 
+    pub(super) fn format_subscription_active_until_text(&self) -> String {
+        let display = self
+            .subscription_for_date_display
+            .as_deref()
+            .unwrap_or("--.--.----");
+        self.language
+            .translate("Активна до: {}")
+            .replacen("{}", display, 1)
+    }
+
+    pub(super) fn format_center_status_text(&self) -> String {
+        if self.connected_at.is_some() {
+            let mb = self.session_traffic_bytes as f64 / 1024.0 / 1024.0;
+            let traffic_text = if mb > 1000.0 {
+                format!("{:.2} GB", mb / 1024.0)
+            } else {
+                format!("{:.2} MB", mb)
+            };
+            format!("{} / {}", self.format_connection_time(), traffic_text)
+        } else if self.subscription_for_date_display.is_some() {
+            self.format_subscription_active_until_text()
+        } else {
+            "00:00:00".to_string()
+        }
+    }
+
+    pub(super) fn maybe_notify_subscription_expiry(&mut self) {
+        let Some(expires_at_unix) = self.subscription_expires_at_unix else {
+            return;
+        };
+
+        if !self
+            .last_subscription_notification_check
+            .map_or(true, |instant| instant.elapsed() >= SUBSCRIPTION_CHECK_INTERVAL)
+        {
+            return;
+        }
+
+        self.last_subscription_notification_check = Some(Instant::now());
+
+        let Some(now_unix) = current_unix_timestamp() else {
+            return;
+        };
+
+        if let Some((kind, notification_mask)) = due_subscription_notification(
+            expires_at_unix,
+            self.subscription_notification_mask,
+            now_unix,
+        ) {
+            self.show_subscription_notification(kind);
+            self.subscription_notification_mask |= notification_mask;
+            save_subscription_notification_state(
+                expires_at_unix,
+                self.subscription_notification_mask,
+            );
+        }
+    }
+
+    fn show_subscription_notification(&mut self, kind: SubscriptionNotificationKind) {
+        self.show_silent_windows_notification(
+            &self.subscription_notification_title(),
+            subscription_notification_message(self.language, kind),
+            subscription_notification_launch(kind),
+        );
+    }
+
+    pub(super) fn subscription_notification_title(&self) -> String {
+        subscription_notification_title_from_conf_path(self.conf_path.as_deref())
+    }
+
     pub(super) fn gif_pulse_scale(&mut self) -> f32 {
         if let Some(start) = self.gif_pulse_start {
             let elapsed = start.elapsed().as_millis() as f32;
@@ -273,6 +443,7 @@ impl AppState {
         self.proxybridge_running = false;
         self.reset_tunnel_traffic_state();
         self.connected_at = None;
+        self.reset_subscription_info_display();
         self.startup_animation_frame = 0;
         self.traffic_opacity = 0.0;
         self.import_button_opacity = 1.0;
@@ -286,9 +457,314 @@ impl AppState {
         self.process_search_text.clear();
         self.language = Language::En;
         self.win_text_cache.clear();
+        clear_subscription_notification_state();
+        sync_subscription_check_task(None);
         delete_app_storage_dirs();
         save_language(self.language);
     }
+}
+
+const SUBINFO_URL: &str = "https://vpnfybot.duckdns.org/subinfo";
+
+fn fetch_subscription_info(conf_path: &str) -> Option<SubscriptionInfo> {
+    let payload = parse_subscription_info_payload(conf_path)?;
+    let body = serde_json::json!({
+        "host": payload.host,
+        "private_key": payload.private_key,
+    })
+    .to_string();
+
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(5))
+        .timeout_read(Duration::from_secs(5))
+        .timeout_write(Duration::from_secs(5))
+        .build();
+
+    let response = agent
+        .post(SUBINFO_URL)
+        .set("Accept", "application/json")
+        .set("Content-Type", "application/json")
+        .send_string(&body)
+        .ok()?;
+
+    let body = response.into_string().ok()?;
+    let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+    extract_subscription_info(&json)
+}
+
+fn parse_subscription_info_payload(conf_path: &str) -> Option<SubscriptionInfoPayload> {
+    let config = fs::read_to_string(conf_path).ok()?;
+    let mut current_section = "";
+    let mut private_key = None;
+    let mut endpoint_host = None;
+
+    for raw_line in config.lines() {
+        let line = raw_line
+            .split(|ch| matches!(ch, '#' | ';'))
+            .next()
+            .unwrap_or_default()
+            .trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        if line.starts_with('[') && line.ends_with(']') {
+            current_section = line.trim_matches(['[', ']']).trim();
+            continue;
+        }
+
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+
+        let key = key.trim();
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+
+        if current_section.eq_ignore_ascii_case("Interface")
+            && key.eq_ignore_ascii_case("PrivateKey")
+        {
+            private_key = Some(value.to_string());
+            continue;
+        }
+
+        if endpoint_host.is_none()
+            && current_section.eq_ignore_ascii_case("Peer")
+            && key.eq_ignore_ascii_case("Endpoint")
+        {
+            endpoint_host = parse_endpoint_host(value);
+        }
+    }
+
+    let endpoint_host = endpoint_host?;
+    let host = resolve_subscription_host(&endpoint_host).unwrap_or(endpoint_host);
+    let private_key = private_key?;
+
+    Some(SubscriptionInfoPayload { host, private_key })
+}
+
+fn parse_endpoint_host(endpoint: &str) -> Option<String> {
+    let endpoint = endpoint.trim();
+    if endpoint.is_empty() {
+        return None;
+    }
+
+    if let Some(rest) = endpoint.strip_prefix('[') {
+        let closing = rest.find(']')?;
+        let host = rest[..closing].trim();
+        return (!host.is_empty()).then(|| host.to_string());
+    }
+
+    if let Some((host, _port)) = endpoint.rsplit_once(':') {
+        let host = host.trim();
+        if !host.is_empty() {
+            return Some(host.to_string());
+        }
+    }
+
+    Some(endpoint.to_string())
+}
+
+fn resolve_subscription_host(host: &str) -> Option<String> {
+    let host = host.trim().trim_matches(['[', ']']);
+    if host.is_empty() {
+        return None;
+    }
+
+    let mut fallback = None;
+    if let Ok(addresses) = (host, 0).to_socket_addrs() {
+        for address in addresses {
+            match address {
+                SocketAddr::V4(ipv4) => return Some(ipv4.ip().to_string()),
+                SocketAddr::V6(ipv6) => {
+                    if fallback.is_none() {
+                        fallback = Some(ipv6.ip().to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    fallback.or_else(|| Some(host.to_string()))
+}
+
+fn extract_subscription_info(value: &serde_json::Value) -> Option<SubscriptionInfo> {
+    match value {
+        serde_json::Value::Null => None,
+        serde_json::Value::Bool(_) => None,
+        serde_json::Value::Number(number) => {
+            let timestamp = number.as_i64()?;
+            subscription_info_from_unix_timestamp(timestamp)
+        }
+        serde_json::Value::String(text) => parse_subscription_info_from_string(text),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .find_map(extract_subscription_info),
+        serde_json::Value::Object(map) => map
+            .get("for_date")
+            .and_then(extract_subscription_info)
+            .or_else(|| map.values().find_map(extract_subscription_info)),
+    }
+}
+
+fn parse_subscription_info_from_string(raw: &str) -> Option<SubscriptionInfo> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Ok(timestamp) = trimmed.parse::<i64>() {
+        return subscription_info_from_unix_timestamp(timestamp);
+    }
+
+    parse_subscription_datetime_to_unix(trimmed).and_then(subscription_info_from_unix_timestamp)
+}
+
+fn subscription_info_from_unix_timestamp(timestamp: i64) -> Option<SubscriptionInfo> {
+    let expires_at_unix = normalize_unix_timestamp(timestamp);
+    Some(SubscriptionInfo {
+        expires_at_unix,
+        display_date: format_unix_date_display(expires_at_unix)?,
+    })
+}
+
+fn normalize_unix_timestamp(timestamp: i64) -> i64 {
+    if timestamp.abs() >= 1_000_000_000_000 {
+        timestamp / 1000
+    } else {
+        timestamp
+    }
+}
+
+fn parse_subscription_datetime_to_unix(raw: &str) -> Option<i64> {
+    let trimmed = raw.trim();
+    if trimmed.len() < 10 {
+        return None;
+    }
+
+    let year = trimmed.get(0..4)?.parse::<i32>().ok()?;
+    if trimmed.get(4..5)? != "-" || trimmed.get(7..8)? != "-" {
+        return None;
+    }
+    let month = trimmed.get(5..7)?.parse::<u32>().ok()?;
+    let day = trimmed.get(8..10)?.parse::<u32>().ok()?;
+
+    let mut index = 10usize;
+    let bytes = trimmed.as_bytes();
+
+    while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+        index += 1;
+    }
+    if index < bytes.len() && matches!(bytes[index], b'T' | b't') {
+        index += 1;
+    }
+    while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+        index += 1;
+    }
+
+    let mut hours = 0i64;
+    let mut minutes = 0i64;
+    let mut seconds = 0i64;
+    if index + 8 <= bytes.len()
+        && bytes.get(index + 2) == Some(&b':')
+        && bytes.get(index + 5) == Some(&b':')
+    {
+        hours = trimmed.get(index..index + 2)?.parse::<i64>().ok()?;
+        minutes = trimmed.get(index + 3..index + 5)?.parse::<i64>().ok()?;
+        seconds = trimmed.get(index + 6..index + 8)?.parse::<i64>().ok()?;
+        index += 8;
+    }
+
+    if index < bytes.len() && bytes[index] == b'.' {
+        index += 1;
+        while index < bytes.len() && bytes[index].is_ascii_digit() {
+            index += 1;
+        }
+    }
+
+    while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+        index += 1;
+    }
+
+    let mut offset_seconds = 0i64;
+    if index < bytes.len() {
+        match bytes[index] {
+            b'Z' | b'z' => {}
+            b'+' | b'-' => {
+                let sign = if bytes[index] == b'+' { 1i64 } else { -1i64 };
+                index += 1;
+                let offset_hours = trimmed.get(index..index + 2)?.parse::<i64>().ok()?;
+                index += 2;
+                if index < bytes.len() && bytes[index] == b':' {
+                    index += 1;
+                }
+                let offset_minutes = if index + 2 <= bytes.len()
+                    && bytes[index..index + 2].iter().all(|byte| byte.is_ascii_digit())
+                {
+                    trimmed.get(index..index + 2)?.parse::<i64>().ok()?
+                } else {
+                    0
+                };
+                offset_seconds = sign * (offset_hours * 3600 + offset_minutes * 60);
+            }
+            _ => {}
+        }
+    }
+
+    let days = days_from_civil(year, month, day)?;
+    let naive_seconds = days * 86_400 + hours * 3600 + minutes * 60 + seconds;
+    Some(naive_seconds - offset_seconds)
+}
+
+fn format_unix_date_display(timestamp: i64) -> Option<String> {
+    let seconds = normalize_unix_timestamp(timestamp);
+
+    let days = seconds.div_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    Some(format!("{:02}.{:02}.{:04}", month, day, year))
+}
+
+fn current_unix_timestamp() -> Option<i64> {
+    Some(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_secs() as i64,
+    )
+}
+
+fn days_from_civil(year: i32, month: u32, day: u32) -> Option<i64> {
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+
+    let year = year as i64 - if month <= 2 { 1 } else { 0 };
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let month = month as i64;
+    let day = day as i64;
+    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    Some(era * 146_097 + day_of_era - 719_468)
+}
+
+fn civil_from_days(days_since_unix_epoch: i64) -> (i32, u32, u32) {
+    let z = days_since_unix_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let day_of_era = z - era * 146_097;
+    let year_of_era = (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let mut year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
+    if month <= 2 {
+        year += 1;
+    }
+
+    (year as i32, month as u32, day as u32)
 }
 
 fn quote_windows_argument(argument: &OsStr) -> String {
@@ -319,6 +795,256 @@ fn quote_windows_argument(argument: &OsStr) -> String {
     escaped.push_str(&"\\".repeat(backslash_count * 2));
     escaped.push('"');
     escaped
+}
+
+fn subscription_notification_title_from_conf_path(conf_path: Option<&str>) -> String {
+    conf_path
+        .and_then(|path| Path::new(path).file_name())
+        .and_then(|name| name.to_str())
+        .unwrap_or("config.conf")
+        .to_string()
+}
+
+fn subscription_notification_message(
+    language: Language,
+    kind: SubscriptionNotificationKind,
+) -> &'static str {
+    match kind {
+        SubscriptionNotificationKind::Warning72Hours => {
+            language.translate("Подписка истекает через 72 часа❗️")
+        }
+        SubscriptionNotificationKind::Warning48Hours => {
+            language.translate("Подписка истекает через 48 часов❗️")
+        }
+        SubscriptionNotificationKind::Warning24Hours => {
+            language.translate("Подписка истекает через 24 часа❗️")
+        }
+        SubscriptionNotificationKind::Expired => language.translate("Подписка истекла❗️"),
+    }
+}
+
+fn subscription_notification_launch(kind: SubscriptionNotificationKind) -> &'static str {
+    match kind {
+        SubscriptionNotificationKind::Warning72Hours => {
+            "vpnfybot-windows/subscription-warning-72"
+        }
+        SubscriptionNotificationKind::Warning48Hours => {
+            "vpnfybot-windows/subscription-warning-48"
+        }
+        SubscriptionNotificationKind::Warning24Hours => {
+            "vpnfybot-windows/subscription-warning-24"
+        }
+        SubscriptionNotificationKind::Expired => "vpnfybot-windows/subscription-expired",
+    }
+}
+
+fn notification_mask_for_kind(kind: SubscriptionNotificationKind) -> u8 {
+    match kind {
+        SubscriptionNotificationKind::Warning72Hours => SUBSCRIPTION_NOTIFY_72_HOURS,
+        SubscriptionNotificationKind::Warning48Hours => SUBSCRIPTION_NOTIFY_48_HOURS,
+        SubscriptionNotificationKind::Warning24Hours => SUBSCRIPTION_NOTIFY_24_HOURS,
+        SubscriptionNotificationKind::Expired => SUBSCRIPTION_NOTIFY_EXPIRED,
+    }
+}
+
+fn due_subscription_notification(
+    expires_at_unix: i64,
+    notification_mask: u8,
+    now_unix: i64,
+) -> Option<(SubscriptionNotificationKind, u8)> {
+    let seconds_remaining = expires_at_unix - now_unix;
+    let kind = if seconds_remaining <= 0 {
+        SubscriptionNotificationKind::Expired
+    } else if seconds_remaining <= 24 * 3600 {
+        SubscriptionNotificationKind::Warning24Hours
+    } else if seconds_remaining <= 48 * 3600 {
+        SubscriptionNotificationKind::Warning48Hours
+    } else if seconds_remaining <= 72 * 3600 {
+        SubscriptionNotificationKind::Warning72Hours
+    } else {
+        return None;
+    };
+
+    let mask = notification_mask_for_kind(kind);
+    (notification_mask & mask == 0).then_some((kind, mask))
+}
+
+fn sync_subscription_check_task(conf_path: Option<&str>) {
+    let result = if conf_path.is_some() {
+        ensure_subscription_check_task_registered()
+    } else {
+        clear_subscription_notification_state();
+        remove_subscription_check_task()
+    };
+
+    if let Err(error) = result {
+        eprintln!(
+            "⚠ Не удалось синхронизировать задачу проверки подписки в планировщике: {}",
+            error
+        );
+    }
+}
+
+fn ensure_subscription_check_task_registered() -> Result<(), String> {
+    let exe_path = env::current_exe()
+        .map_err(|error| format!("Не удалось определить путь к приложению для планировщика: {}", error))?;
+    let task_command = format!(
+        "{} {}",
+        quote_windows_argument(exe_path.as_os_str()),
+        SUBSCRIPTION_SCHEDULED_TASK_ARG,
+    );
+
+    let mut command = std::process::Command::new("schtasks");
+    command.args([
+        "/Create",
+        "/SC",
+        "MINUTE",
+        "/MO",
+        "1",
+        "/TN",
+        SUBSCRIPTION_SCHEDULED_TASK_NAME,
+        "/TR",
+        &task_command,
+        "/RL",
+        "LIMITED",
+        "/IT",
+        "/F",
+    ]);
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = command
+        .output()
+        .map_err(|error| format!("Не удалось запустить schtasks для создания задачи: {}", error))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "schtasks /Create завершился с кодом {}",
+            output.status.code().unwrap_or(-1)
+        ))
+    }
+}
+
+fn remove_subscription_check_task() -> Result<(), String> {
+    let mut command = std::process::Command::new("schtasks");
+    command.args([
+        "/Delete",
+        "/TN",
+        SUBSCRIPTION_SCHEDULED_TASK_NAME,
+        "/F",
+    ]);
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = command
+        .output()
+        .map_err(|error| format!("Не удалось запустить schtasks для удаления задачи: {}", error))?;
+
+    if output.status.success() || String::from_utf8_lossy(&output.stderr).contains("cannot find") {
+        Ok(())
+    } else {
+        Err(format!(
+            "schtasks /Delete завершился с кодом {}",
+            output.status.code().unwrap_or(-1)
+        ))
+    }
+}
+
+fn initialize_app_environment(reset_runtime_state: bool) {
+    match app_dirs::AppDirs::init() {
+        Ok(app_dirs) => {
+            if reset_runtime_state {
+                if let Err(error) = app_dirs.reset_runtime_state() {
+                    eprintln!("⚠ Ошибка очистки runtime-временных файлов: {}", error);
+                }
+
+                eprintln!(
+                    "✓ Инициализирована структура приложения в: {}",
+                    app_dirs.root.display()
+                );
+                eprintln!("  ├─ Логи: {}", app_dirs.logs.display());
+                eprintln!("  ├─ Разрешения: {}", app_dirs.permissions.display());
+                eprintln!("  ├─ Конфиги: {}", app_dirs.configs.display());
+                eprintln!("  └─ Кэш: {}", app_dirs.cache.display());
+            }
+        }
+        Err(error) => {
+            eprintln!("⚠ Ошибка инициализации директорий: {}", error);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    if let Err(error) = super::app_windows::ensure_notification_shortcut_registered() {
+        eprintln!(
+            "⚠ Не удалось зарегистрировать ярлык уведомлений для {}: {}",
+            NOTIFICATION_APP_ID,
+            error
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    configure_process_notification_identity();
+}
+
+fn run_subscription_check_mode() -> ! {
+    initialize_app_environment(false);
+
+    let language = load_language();
+    let Some(conf_path) = load_saved_conf_path() else {
+        clear_subscription_notification_state();
+        let _ = remove_subscription_check_task();
+        std::process::exit(0);
+    };
+
+    let Some(subscription_info) = fetch_subscription_info(&conf_path) else {
+        std::process::exit(0);
+    };
+
+    let mut notification_mask = load_subscription_notification_state()
+        .and_then(|(expires_at_unix, notification_mask)| {
+            (expires_at_unix == subscription_info.expires_at_unix).then_some(notification_mask)
+        })
+        .unwrap_or(0);
+
+    let Some(now_unix) = current_unix_timestamp() else {
+        std::process::exit(0);
+    };
+
+    if let Some((kind, notification_bit)) = due_subscription_notification(
+        subscription_info.expires_at_unix,
+        notification_mask,
+        now_unix,
+    ) {
+        let title = subscription_notification_title_from_conf_path(Some(&conf_path));
+        let message = subscription_notification_message(language, kind);
+        if let Err(error) = super::app_windows::show_silent_windows_notification_detached(
+            &title,
+            message,
+            subscription_notification_launch(kind),
+        ) {
+            eprintln!("⚠ Не удалось показать уведомление проверки подписки: {}", error);
+            std::process::exit(1);
+        }
+        notification_mask |= notification_bit;
+    }
+
+    save_subscription_notification_state(
+        subscription_info.expires_at_unix,
+        notification_mask,
+    );
+    std::process::exit(0);
 }
 
 pub(crate) fn launch_self_elevated(arguments: &[OsString]) -> Result<(), String> {
@@ -498,6 +1224,9 @@ pub(crate) fn app_main() -> eframe::Result<()> {
     if args.len() >= 2 && args[1] == OsStr::new("/stop-proxybridge") {
         run_stop_proxybridge_mode();
     }
+    if args.len() >= 2 && args[1] == OsStr::new(SUBSCRIPTION_SCHEDULED_TASK_ARG) {
+        run_subscription_check_mode();
+    }
     if args.len() >= 3 && args[1] == OsStr::new("/service") {
         let info_addr = args.get(3).map(|value| value.as_os_str());
         run_wireproxy_mode(&args[2], info_addr);
@@ -510,37 +1239,7 @@ pub(crate) fn app_main() -> eframe::Result<()> {
         std::process::exit(0);
     }
 
-    match app_dirs::AppDirs::init() {
-        Ok(app_dirs) => {
-            if let Err(e) = app_dirs.reset_runtime_state() {
-                eprintln!("⚠ Ошибка очистки runtime-временных файлов: {}", e);
-            }
-
-            eprintln!(
-                "✓ Инициализирована структура приложения в: {}",
-                app_dirs.root.display()
-            );
-            eprintln!("  ├─ Логи: {}", app_dirs.logs.display());
-            eprintln!("  ├─ Разрешения: {}", app_dirs.permissions.display());
-            eprintln!("  ├─ Конфиги: {}", app_dirs.configs.display());
-            eprintln!("  └─ Кэш: {}", app_dirs.cache.display());
-        }
-        Err(e) => {
-            eprintln!("⚠ Ошибка инициализации директорий: {}", e);
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    if let Err(error) = super::app_windows::ensure_notification_shortcut_registered() {
-        eprintln!(
-            "⚠ Не удалось зарегистрировать ярлык уведомлений для {}: {}",
-            NOTIFICATION_APP_ID,
-            error
-        );
-    }
-
-    #[cfg(target_os = "windows")]
-    configure_process_notification_identity();
+    initialize_app_environment(true);
 
     setup_firewall_rules();
 

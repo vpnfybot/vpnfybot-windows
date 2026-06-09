@@ -44,6 +44,33 @@ pub(super) fn save_conf_path(conf: &str) {
     }
 }
 
+fn get_subscription_notification_state_path() -> Option<PathBuf> {
+    let mut path = get_config_storage_path()?;
+    path.set_file_name("subscription_notification_state.txt");
+    Some(path)
+}
+
+pub(super) fn load_subscription_notification_state() -> Option<(i64, u8)> {
+    let path = get_subscription_notification_state_path()?;
+    let content = fs::read_to_string(path).ok()?;
+    let mut lines = content.lines();
+    let expires_at_unix = lines.next()?.trim().parse::<i64>().ok()?;
+    let notification_mask = lines.next()?.trim().parse::<u8>().ok()?;
+    Some((expires_at_unix, notification_mask))
+}
+
+pub(super) fn save_subscription_notification_state(expires_at_unix: i64, notification_mask: u8) {
+    if let Some(path) = get_subscription_notification_state_path() {
+        let _ = fs::write(path, format!("{}\n{}\n", expires_at_unix, notification_mask));
+    }
+}
+
+pub(super) fn clear_subscription_notification_state() {
+    if let Some(path) = get_subscription_notification_state_path() {
+        let _ = fs::remove_file(path);
+    }
+}
+
 pub(super) fn save_selected_processes(processes: &[String]) {
     if let Some(path) = get_config_storage_path() {
         let mut process_file = path.clone();
