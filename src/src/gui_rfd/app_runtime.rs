@@ -1,4 +1,8 @@
 use super::*;
+#[cfg(target_os = "windows")]
+use super::app_windows::{
+    publish_taskbar_traffic_widget_snapshot, set_taskbar_traffic_widget_worker_enabled,
+};
 
 const SUBSCRIPTION_NOTIFY_72_HOURS: u8 = 1 << 0;
 const SUBSCRIPTION_NOTIFY_48_HOURS: u8 = 1 << 1;
@@ -19,14 +23,19 @@ enum SubscriptionNotificationKind {
 impl Default for AppState {
     fn default() -> Self {
         let conf_path = load_saved_conf_path();
+        let imported_conf_is_amnezia_wireguard = conf_path
+            .as_deref()
+            .is_some_and(is_amnezia_wireguard_config_path);
         let status = String::new();
         let selected_processes = load_selected_processes();
         let selected_sites = load_selected_sites();
         let proxy_mode_toggle = load_proxy_mode();
+        let taskbar_widget_enabled = load_taskbar_widget_enabled();
         let language = load_language();
 
         let mut s = Self {
             conf_path,
+            imported_conf_is_amnezia_wireguard,
             status,
             error_log: None,
             status_rx: None,
@@ -52,6 +61,7 @@ impl Default for AppState {
             cached_down_display: "0.00".to_string(),
             last_upload_bps: 0.0,
             last_download_bps: 0.0,
+            traffic_history: VecDeque::new(),
             upload_icon: None,
             download_icon: None,
             top_image: None,
@@ -70,6 +80,11 @@ impl Default for AppState {
             tray_icon_added: false,
             tray_window: None,
             tray_icon: None,
+            #[cfg(target_os = "windows")]
+            taskbar_widget_window: None,
+            #[cfg(target_os = "windows")]
+            taskbar_widget_monitor: None,
+            taskbar_widget_enabled,
             traffic_opacity: 0.0,
             import_button_opacity: 1.0,
             connect_animation_start: None,
@@ -102,6 +117,7 @@ impl Default for AppState {
 
 impl AppState {
     pub(super) fn set_imported_conf_path(&mut self, path: String) {
+        self.imported_conf_is_amnezia_wireguard = is_amnezia_wireguard_config_path(&path);
         self.conf_path = Some(path);
         self.error_log = None;
         save_conf_path(self.conf_path.as_ref().unwrap());
@@ -199,20 +215,72 @@ impl AppState {
             return;
         };
 
+        #[cfg(target_os = "windows")]
+        set_taskbar_traffic_widget_worker_enabled(self.taskbar_widget_enabled);
+
         let (tx, rx) = mpsc::channel();
         let stop_flag = Arc::new(AtomicBool::new(false));
         let worker_stop = stop_flag.clone();
 
         thread::spawn(move || {
+            let mut worker_last_totals = None;
+            let mut worker_last_poll = None;
+            let mut worker_history: VecDeque<TrafficHistoryPoint> = VecDeque::new();
+
             while !worker_stop.load(Ordering::Relaxed) {
                 if let Some((tx_bytes, rx_bytes)) = fetch_wireproxy_metrics(&info_addr)
                     .and_then(|metrics| parse_wireproxy_metrics_rx_tx(&metrics))
                 {
+                    let captured_at = Instant::now();
+                    let total_bytes = tx_bytes.saturating_add(rx_bytes);
+                    let (upload_bps, download_bps) =
+                        if let Some((prev_tx, prev_rx)) = worker_last_totals {
+                            let elapsed = worker_last_poll
+                                .map(|previous| captured_at.duration_since(previous))
+                                .unwrap_or(TUNNEL_TRAFFIC_POLL_INTERVAL);
+                            let secs = elapsed.as_secs_f64().max(0.000_001);
+                            (
+                                tx_bytes.saturating_sub(prev_tx) as f64 / secs,
+                                rx_bytes.saturating_sub(prev_rx) as f64 / secs,
+                            )
+                        } else {
+                            (0.0, 0.0)
+                        };
+
+                    worker_history.push_back(TrafficHistoryPoint {
+                        upload_bps,
+                        download_bps,
+                        captured_at,
+                    });
+                    while worker_history.len() > TASKBAR_TRAFFIC_HISTORY_CAPACITY {
+                        let _ = worker_history.pop_front();
+                    }
+                    while worker_history.front().is_some_and(|point| {
+                        captured_at.duration_since(point.captured_at)
+                            > TASKBAR_TRAFFIC_HISTORY_WINDOW
+                    }) {
+                        let _ = worker_history.pop_front();
+                    }
+
+                    #[cfg(target_os = "windows")]
+                    publish_taskbar_traffic_widget_snapshot(
+                        true,
+                        upload_bps,
+                        download_bps,
+                        worker_history
+                            .iter()
+                            .map(|point| (point.upload_bps, point.download_bps))
+                            .collect(),
+                    );
+
+                    worker_last_totals = Some((tx_bytes, rx_bytes));
+                    worker_last_poll = Some(captured_at);
+
                     let sample = TunnelTrafficSample {
-                        total_bytes: tx_bytes.saturating_add(rx_bytes),
+                        total_bytes,
                         tx_bytes,
                         rx_bytes,
-                        captured_at: Instant::now(),
+                        captured_at,
                     };
 
                     if tx.send(sample).is_err() {
@@ -240,6 +308,8 @@ impl AppState {
         if let Some(stop_flag) = self.traffic_worker_stop.take() {
             stop_flag.store(true, Ordering::Relaxed);
         }
+        #[cfg(target_os = "windows")]
+        publish_taskbar_traffic_widget_snapshot(false, 0.0, 0.0, Vec::new());
         self.traffic_worker_receiver = None;
     }
 
@@ -275,6 +345,20 @@ impl AppState {
             self.last_download_bps = 0.0;
         }
 
+        self.traffic_history.push_back(TrafficHistoryPoint {
+            upload_bps: self.last_upload_bps,
+            download_bps: self.last_download_bps,
+            captured_at: sample.captured_at,
+        });
+        while self.traffic_history.len() > TASKBAR_TRAFFIC_HISTORY_CAPACITY {
+            let _ = self.traffic_history.pop_front();
+        }
+        while self.traffic_history.front().is_some_and(|point| {
+            sample.captured_at.duration_since(point.captured_at) > TASKBAR_TRAFFIC_HISTORY_WINDOW
+        }) {
+            let _ = self.traffic_history.pop_front();
+        }
+
         self.last_tunnel_totals = Some((sample.tx_bytes, sample.rx_bytes));
         self.last_tunnel_traffic_poll = Some(sample.captured_at);
         true
@@ -289,6 +373,7 @@ impl AppState {
         self.last_tunnel_totals = None;
         self.last_upload_bps = 0.0;
         self.last_download_bps = 0.0;
+        self.traffic_history.clear();
         self.last_time_display_update = None;
         self.cached_time_display.clear();
         self.cached_up_display.clear();
@@ -342,7 +427,9 @@ impl AppState {
 
         if !self
             .last_subscription_notification_check
-            .map_or(true, |instant| instant.elapsed() >= SUBSCRIPTION_CHECK_INTERVAL)
+            .map_or(true, |instant| {
+                instant.elapsed() >= SUBSCRIPTION_CHECK_INTERVAL
+            })
         {
             return;
         }
@@ -431,7 +518,11 @@ impl AppState {
     }
 
     pub(super) fn reset_app_settings(&mut self) {
+        if let Err(error) = restore_tunnel_dns() {
+            log::warn!("Failed to restore DNS while resetting settings: {}", error);
+        }
         self.conf_path = None;
+        self.imported_conf_is_amnezia_wireguard = false;
         self.selected_processes.clear();
         self.selected_sites.clear();
         self.proxy_mode_toggle = false;
@@ -443,6 +534,7 @@ impl AppState {
         self.proxybridge_running = false;
         self.reset_tunnel_traffic_state();
         self.connected_at = None;
+        self.taskbar_widget_enabled = true;
         self.reset_subscription_info_display();
         self.startup_animation_frame = 0;
         self.traffic_opacity = 0.0;
@@ -465,6 +557,68 @@ impl AppState {
 }
 
 const SUBINFO_URL: &str = "https://vpnfybot.duckdns.org/subinfo";
+
+pub(super) fn is_amnezia_wireguard_config_path(conf_path: &str) -> bool {
+    fs::read_to_string(conf_path)
+        .map(|config| is_amnezia_wireguard_config_content(&config))
+        .unwrap_or(false)
+}
+
+fn is_amnezia_wireguard_config_content(config: &str) -> bool {
+    let mut current_section = "";
+
+    for raw_line in config.lines() {
+        let line = raw_line
+            .split(|ch| matches!(ch, '#' | ';'))
+            .next()
+            .unwrap_or_default()
+            .trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        if line.starts_with('[') && line.ends_with(']') {
+            current_section = line.trim_matches(['[', ']']).trim();
+            continue;
+        }
+
+        if !current_section.eq_ignore_ascii_case("Interface") {
+            continue;
+        }
+
+        let Some((key, _value)) = line.split_once('=') else {
+            continue;
+        };
+
+        if is_amnezia_wireguard_key(key.trim()) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn is_amnezia_wireguard_key(key: &str) -> bool {
+    let normalized = key.to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "jc" | "jmin"
+            | "jmax"
+            | "s1"
+            | "s2"
+            | "s3"
+            | "s4"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "i1"
+            | "i2"
+            | "i3"
+            | "i4"
+            | "i5"
+    )
+}
 
 fn fetch_subscription_info(conf_path: &str) -> Option<SubscriptionInfo> {
     let payload = parse_subscription_info_payload(conf_path)?;
@@ -599,9 +753,7 @@ fn extract_subscription_info(value: &serde_json::Value) -> Option<SubscriptionIn
             subscription_info_from_unix_timestamp(timestamp)
         }
         serde_json::Value::String(text) => parse_subscription_info_from_string(text),
-        serde_json::Value::Array(items) => items
-            .iter()
-            .find_map(extract_subscription_info),
+        serde_json::Value::Array(items) => items.iter().find_map(extract_subscription_info),
         serde_json::Value::Object(map) => map
             .get("for_date")
             .and_then(extract_subscription_info)
@@ -701,7 +853,9 @@ fn parse_subscription_datetime_to_unix(raw: &str) -> Option<i64> {
                     index += 1;
                 }
                 let offset_minutes = if index + 2 <= bytes.len()
-                    && bytes[index..index + 2].iter().all(|byte| byte.is_ascii_digit())
+                    && bytes[index..index + 2]
+                        .iter()
+                        .all(|byte| byte.is_ascii_digit())
                 {
                     trimmed.get(index..index + 2)?.parse::<i64>().ok()?
                 } else {
@@ -754,7 +908,8 @@ fn civil_from_days(days_since_unix_epoch: i64) -> (i32, u32, u32) {
     let z = days_since_unix_epoch + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let day_of_era = z - era * 146_097;
-    let year_of_era = (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
     let mut year = year_of_era + era * 400;
     let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_prime = (5 * day_of_year + 2) / 153;
@@ -825,15 +980,9 @@ fn subscription_notification_message(
 
 fn subscription_notification_launch(kind: SubscriptionNotificationKind) -> &'static str {
     match kind {
-        SubscriptionNotificationKind::Warning72Hours => {
-            "vpnfybot-windows/subscription-warning-72"
-        }
-        SubscriptionNotificationKind::Warning48Hours => {
-            "vpnfybot-windows/subscription-warning-48"
-        }
-        SubscriptionNotificationKind::Warning24Hours => {
-            "vpnfybot-windows/subscription-warning-24"
-        }
+        SubscriptionNotificationKind::Warning72Hours => "vpnfybot-windows/subscription-warning-72",
+        SubscriptionNotificationKind::Warning48Hours => "vpnfybot-windows/subscription-warning-48",
+        SubscriptionNotificationKind::Warning24Hours => "vpnfybot-windows/subscription-warning-24",
         SubscriptionNotificationKind::Expired => "vpnfybot-windows/subscription-expired",
     }
 }
@@ -886,8 +1035,12 @@ fn sync_subscription_check_task(conf_path: Option<&str>) {
 }
 
 fn ensure_subscription_check_task_registered() -> Result<(), String> {
-    let exe_path = env::current_exe()
-        .map_err(|error| format!("Не удалось определить путь к приложению для планировщика: {}", error))?;
+    let exe_path = env::current_exe().map_err(|error| {
+        format!(
+            "Не удалось определить путь к приложению для планировщика: {}",
+            error
+        )
+    })?;
     let task_command = format!(
         "{} {}",
         quote_windows_argument(exe_path.as_os_str()),
@@ -918,9 +1071,12 @@ fn ensure_subscription_check_task_registered() -> Result<(), String> {
         command.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let output = command
-        .output()
-        .map_err(|error| format!("Не удалось запустить schtasks для создания задачи: {}", error))?;
+    let output = command.output().map_err(|error| {
+        format!(
+            "Не удалось запустить schtasks для создания задачи: {}",
+            error
+        )
+    })?;
 
     if output.status.success() {
         Ok(())
@@ -934,12 +1090,7 @@ fn ensure_subscription_check_task_registered() -> Result<(), String> {
 
 fn remove_subscription_check_task() -> Result<(), String> {
     let mut command = std::process::Command::new("schtasks");
-    command.args([
-        "/Delete",
-        "/TN",
-        SUBSCRIPTION_SCHEDULED_TASK_NAME,
-        "/F",
-    ]);
+    command.args(["/Delete", "/TN", SUBSCRIPTION_SCHEDULED_TASK_NAME, "/F"]);
 
     #[cfg(target_os = "windows")]
     {
@@ -948,9 +1099,12 @@ fn remove_subscription_check_task() -> Result<(), String> {
         command.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let output = command
-        .output()
-        .map_err(|error| format!("Не удалось запустить schtasks для удаления задачи: {}", error))?;
+    let output = command.output().map_err(|error| {
+        format!(
+            "Не удалось запустить schtasks для удаления задачи: {}",
+            error
+        )
+    })?;
 
     if output.status.success() || String::from_utf8_lossy(&output.stderr).contains("cannot find") {
         Ok(())
@@ -989,8 +1143,7 @@ fn initialize_app_environment(reset_runtime_state: bool) {
     if let Err(error) = super::app_windows::ensure_notification_shortcut_registered() {
         eprintln!(
             "⚠ Не удалось зарегистрировать ярлык уведомлений для {}: {}",
-            NOTIFICATION_APP_ID,
-            error
+            NOTIFICATION_APP_ID, error
         );
     }
 
@@ -1034,16 +1187,16 @@ fn run_subscription_check_mode() -> ! {
             message,
             subscription_notification_launch(kind),
         ) {
-            eprintln!("⚠ Не удалось показать уведомление проверки подписки: {}", error);
+            eprintln!(
+                "⚠ Не удалось показать уведомление проверки подписки: {}",
+                error
+            );
             std::process::exit(1);
         }
         notification_mask |= notification_bit;
     }
 
-    save_subscription_notification_state(
-        subscription_info.expires_at_unix,
-        notification_mask,
-    );
+    save_subscription_notification_state(subscription_info.expires_at_unix, notification_mask);
     std::process::exit(0);
 }
 
@@ -1089,7 +1242,10 @@ pub(crate) fn launch_self_elevated(arguments: &[OsString]) -> Result<(), String>
 }
 
 fn check_single_instance() -> bool {
-    let title_wide: Vec<u16> = OsStr::new(WINDOW_TITLE).encode_wide().chain(Some(0)).collect();
+    let title_wide: Vec<u16> = OsStr::new(WINDOW_TITLE)
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
     unsafe {
         let existing_window = FindWindowW(None, PCWSTR(title_wide.as_ptr()));
 
@@ -1107,8 +1263,12 @@ pub(crate) fn ensure_firewall_rules() -> Result<(), String> {
         return Ok(());
     }
 
-    let deps = embedded_deps_bytes::ExtractedDeps::get()
-        .map_err(|e| format!("Не удалось получить пути к зависимостям для брандмауэра: {}", e))?;
+    let deps = embedded_deps_bytes::ExtractedDeps::get().map_err(|e| {
+        format!(
+            "Не удалось получить пути к зависимостям для брандмауэра: {}",
+            e
+        )
+    })?;
 
     install_firewall_rules(
         deps.wireproxy.to_string_lossy().as_ref(),
@@ -1117,7 +1277,8 @@ pub(crate) fn ensure_firewall_rules() -> Result<(), String> {
 }
 
 fn install_firewall_rules(wireproxy_path: &str, proxybridge_path: &str) -> Result<(), String> {
-    let script = format!(r#"
+    let script = format!(
+        r#"
 # Функция для добавления или обновления правила брандмауэра
 function Set-FirewallRule {{
     param(
@@ -1157,12 +1318,19 @@ function Set-FirewallRule {{
 
 Set-FirewallRule -RuleName "vpnfybot-windows - wireproxy (incoming)" -ProgramPath "{wireproxy_path}"
 Set-FirewallRule -RuleName "vpnfybot-windows - ProxyBridge (incoming)" -ProgramPath "{proxybridge_path}"
-"#);
+"#
+    );
 
     let mut cmd = std::process::Command::new("powershell");
-    cmd.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
+    cmd.args([
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        &script,
+    ])
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null());
 
     #[cfg(target_os = "windows")]
     {
@@ -1171,13 +1339,19 @@ Set-FirewallRule -RuleName "vpnfybot-windows - ProxyBridge (incoming)" -ProgramP
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Не удалось запустить PowerShell для установки правил: {}", e))?;
+    let mut child = cmd.spawn().map_err(|e| {
+        format!(
+            "Не удалось запустить PowerShell для установки правил: {}",
+            e
+        )
+    })?;
 
-    let status = child
-        .wait()
-        .map_err(|e| format!("Ошибка ожидания процесса установки правил брандмауэра: {}", e))?;
+    let status = child.wait().map_err(|e| {
+        format!(
+            "Ошибка ожидания процесса установки правил брандмауэра: {}",
+            e
+        )
+    })?;
 
     if status.success() {
         Ok(())
@@ -1194,14 +1368,12 @@ fn setup_firewall_rules() {
         return;
     }
 
-    thread::spawn(|| {
-        match ensure_firewall_rules() {
-            Ok(()) => {
-                eprintln!("✓ Правила брандмауэра успешно установлены");
-            }
-            Err(error) => {
-                eprintln!("⚠ Ошибка при установке правил брандмауэра: {}", error);
-            }
+    thread::spawn(|| match ensure_firewall_rules() {
+        Ok(()) => {
+            eprintln!("✓ Правила брандмауэра успешно установлены");
+        }
+        Err(error) => {
+            eprintln!("⚠ Ошибка при установке правил брандмауэра: {}", error);
         }
     });
 }
@@ -1241,6 +1413,10 @@ pub(crate) fn app_main() -> eframe::Result<()> {
 
     initialize_app_environment(true);
 
+    if let Err(error) = restore_tunnel_dns() {
+        log::warn!("Failed to restore stale DNS state on startup: {}", error);
+    }
+
     setup_firewall_rules();
 
     let pid_file = managed_cache_dir().join("proxybridge.pid");
@@ -1265,8 +1441,7 @@ pub(crate) fn app_main() -> eframe::Result<()> {
         .with_maximize_button(false)
         .with_decorations(true)
         .with_icon(
-            from_png_bytes(include_bytes!("../../gifs/vpnfy.png"))
-                .expect("Failed to load icon"),
+            from_png_bytes(include_bytes!("../../gifs/vpnfy.png")).expect("Failed to load icon"),
         );
 
     eframe::run_native(
@@ -1280,6 +1455,8 @@ pub(crate) fn app_main() -> eframe::Result<()> {
 }
 
 fn run_wireproxy_mode(conf: &OsStr, info_addr: Option<&OsStr>) -> ! {
+    initialize_app_environment(false);
+
     let conf_path = conf.to_string_lossy();
 
     let deps = match embedded_deps_bytes::ExtractedDeps::get() {
@@ -1291,7 +1468,14 @@ fn run_wireproxy_mode(conf: &OsStr, info_addr: Option<&OsStr>) -> ! {
     };
 
     if let Err(error) = ensure_firewall_rules() {
-        eprintln!("⚠ Не удалось подготовить правила брандмауэра для wireproxy: {}", error);
+        eprintln!(
+            "⚠ Не удалось подготовить правила брандмауэра для wireproxy: {}",
+            error
+        );
+    }
+
+    if let Err(error) = apply_tunnel_dns(conf_path.as_ref()) {
+        eprintln!("Failed to apply tunnel DNS before wireproxy start: {}", error);
     }
 
     let mut command = std::process::Command::new(&deps.wireproxy);
@@ -1302,7 +1486,9 @@ fn run_wireproxy_mode(conf: &OsStr, info_addr: Option<&OsStr>) -> ! {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     if let Some(info_addr) = info_addr {
-        command.arg("--info").arg(info_addr.to_string_lossy().as_ref());
+        command
+            .arg("--info")
+            .arg(info_addr.to_string_lossy().as_ref());
     }
 
     #[cfg(target_os = "windows")]

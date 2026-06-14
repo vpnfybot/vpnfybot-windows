@@ -5,6 +5,14 @@ use std::mem::ManuallyDrop;
 #[cfg(target_os = "windows")]
 use windows::core::{ComInterface, GUID, HRESULT, PWSTR};
 #[cfg(target_os = "windows")]
+use windows::Win32::Foundation::SIZE;
+#[cfg(target_os = "windows")]
+use windows::Win32::Graphics::Gdi::{
+    BeginPaint, CreatePen, EndPaint, GetMonitorInfoW, GetTextExtentPoint32W, HMONITOR,
+    InvalidateRect, LineTo, MonitorFromWindow, MoveToEx, DRAW_TEXT_FORMAT, DT_LEFT, MONITORINFO,
+    MONITOR_DEFAULTTONEAREST, PAINTSTRUCT, PS_SOLID,
+};
+#[cfg(target_os = "windows")]
 use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Com::StructuredStorage::{
@@ -16,7 +24,24 @@ use windows::Win32::System::Com::{
     COINIT_APARTMENTTHREADED, VT_LPWSTR,
 };
 #[cfg(target_os = "windows")]
-use windows::Win32::UI::Shell::{PropertiesSystem::IPropertyStore, IShellLinkW};
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::Shell::{IShellLinkW, PropertiesSystem::IPropertyStore};
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::Controls::WM_MOUSELEAVE;
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    TrackMouseEvent, TRACKMOUSEEVENT, TME_LEAVE,
+};
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::WindowsAndMessaging::{
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetWindowRect, IsWindow,
+    LoadCursorW, RegisterClassW, SetCursor, SetLayeredWindowAttributes, SetWindowPos, FindWindowExW,
+    HWND_TOPMOST, HTCLIENT, IDC_HAND, LWA_COLORKEY, SWP_NOACTIVATE, SWP_NOOWNERZORDER,
+    SWP_SHOWWINDOW, WM_ERASEBKGND, WM_GETOBJECT, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST,
+    WM_PAINT, WM_SETCURSOR, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
+};
 
 const TRAY_CALLBACK_MESSAGE: u32 = WM_APP + 1;
 const WM_COPYGLOBALDATA: u32 = 0x0049;
@@ -28,10 +53,644 @@ const NOTIFICATION_SHORTCUT_NAME: &str = "vpnfybot-windows.lnk";
 const CLSID_SHELL_LINK: GUID = GUID::from_u128(0x00021401_0000_0000_c000_000000000046);
 static DROP_FILE_PATH: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static MINIMIZE_VIA_MINBUTTON: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "windows")]
+const TASKBAR_TRAFFIC_WIDGET_CLASS: &str = "vpnfy_taskbar_traffic_widget";
+#[cfg(target_os = "windows")]
+const TASKBAR_TRAFFIC_WIDGET_WIDTH: f32 = 260.0;
+#[cfg(target_os = "windows")]
+const TASKBAR_TRAFFIC_WIDGET_HEIGHT: f32 = 42.0;
+#[cfg(target_os = "windows")]
+static TASKBAR_TRAFFIC_WIDGET_CLASS_REGISTERED: OnceLock<()> = OnceLock::new();
+#[cfg(target_os = "windows")]
+static TASKBAR_TRAFFIC_WIDGET_DATA: OnceLock<Mutex<TaskbarTrafficWidgetSnapshot>> = OnceLock::new();
+#[cfg(target_os = "windows")]
+static TASKBAR_TRAFFIC_WIDGET_HOVERED: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "windows")]
+static TASKBAR_TRAFFIC_WIDGET_HWND: std::sync::atomic::AtomicIsize =
+    std::sync::atomic::AtomicIsize::new(0);
+#[cfg(target_os = "windows")]
+static TASKBAR_TRAFFIC_WIDGET_WORKER_ENABLED: AtomicBool = AtomicBool::new(true);
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy)]
+struct TaskbarWidgetAnchor {
+    rect: RECT,
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone)]
+struct TaskbarTrafficWidgetSnapshot {
+    visible: bool,
+    upload_bps: f64,
+    download_bps: f64,
+    history: Vec<(f64, f64)>,
+}
+
+#[cfg(target_os = "windows")]
+impl Default for TaskbarTrafficWidgetSnapshot {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            upload_bps: 0.0,
+            download_bps: 0.0,
+            history: Vec::new(),
+        }
+    }
+}
 
 #[cfg(target_os = "windows")]
 fn windows_error(message: impl Into<String>) -> windows::core::Error {
     windows::core::Error::new(HRESULT(0x80004005u32 as i32), HSTRING::from(message.into()))
+}
+
+#[cfg(target_os = "windows")]
+fn taskbar_traffic_widget_data() -> &'static Mutex<TaskbarTrafficWidgetSnapshot> {
+    TASKBAR_TRAFFIC_WIDGET_DATA.get_or_init(|| Mutex::new(TaskbarTrafficWidgetSnapshot::default()))
+}
+
+#[cfg(target_os = "windows")]
+pub(super) fn set_taskbar_traffic_widget_worker_enabled(enabled: bool) {
+    TASKBAR_TRAFFIC_WIDGET_WORKER_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+#[cfg(target_os = "windows")]
+pub(super) fn publish_taskbar_traffic_widget_snapshot(
+    visible: bool,
+    upload_bps: f64,
+    download_bps: f64,
+    history: Vec<(f64, f64)>,
+) {
+    let visible = visible && TASKBAR_TRAFFIC_WIDGET_WORKER_ENABLED.load(Ordering::Relaxed);
+    if let Ok(mut guard) = taskbar_traffic_widget_data().lock() {
+        *guard = TaskbarTrafficWidgetSnapshot {
+            visible,
+            upload_bps,
+            download_bps,
+            history,
+        };
+    }
+
+    let hwnd_raw = TASKBAR_TRAFFIC_WIDGET_HWND.load(Ordering::Relaxed);
+    if hwnd_raw == 0 {
+        return;
+    }
+
+    let hwnd = HWND(hwnd_raw);
+    unsafe {
+        if !IsWindow(hwnd).as_bool() {
+            TASKBAR_TRAFFIC_WIDGET_HWND.store(0, Ordering::Relaxed);
+            return;
+        }
+
+        if visible {
+            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            let _ = InvalidateRect(hwnd, None, false);
+        } else {
+            TASKBAR_TRAFFIC_WIDGET_HOVERED.store(false, Ordering::Relaxed);
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn rgb(r: u8, g: u8, b: u8) -> COLORREF {
+    COLORREF((r as u32) | ((g as u32) << 8) | ((b as u32) << 16))
+}
+
+#[cfg(target_os = "windows")]
+fn taskbar_widget_transparent_color() -> COLORREF {
+    rgb(1, 2, 3)
+}
+
+#[cfg(target_os = "windows")]
+fn format_taskbar_speed(bytes_per_second: f64) -> (String, &'static str) {
+    let mut value = bytes_per_second.max(0.0);
+    let mut unit_index = 0usize;
+    let units = ["B/s", "KB/s", "MB/s", "GB/s"];
+    while value >= 1024.0 && unit_index + 1 < units.len() {
+        value /= 1024.0;
+        unit_index += 1;
+    }
+
+    let value_text = if unit_index == 0 {
+        format!("{:.0}", value)
+    } else if value >= 100.0 {
+        format!("{:.0}", value)
+    } else {
+        format!("{:.1}", value)
+    };
+
+    (value_text, units[unit_index])
+}
+
+#[cfg(target_os = "windows")]
+fn widget_dimensions_for_taskbar(taskbar_width: i32, taskbar_height: i32) -> (i32, i32) {
+    let scale = current_ui_scale_factor().max(1.0);
+    let width = (TASKBAR_TRAFFIC_WIDGET_WIDTH * scale).round() as i32;
+    let desired_height = (TASKBAR_TRAFFIC_WIDGET_HEIGHT * scale).round() as i32;
+    let cross_size = taskbar_width.min(taskbar_height).max(1);
+    let height = desired_height.min((cross_size - 4).max(30));
+    (width.max(180), height.max(30))
+}
+
+#[cfg(target_os = "windows")]
+fn find_primary_taskbar_window() -> Option<HWND> {
+    let hwnd = unsafe { FindWindowW(w!("Shell_TrayWnd"), PCWSTR::null()) };
+    (hwnd.0 != 0).then_some(hwnd)
+}
+
+#[cfg(target_os = "windows")]
+fn monitor_from_window(hwnd: HWND) -> Option<HMONITOR> {
+    let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+    (monitor.0 != 0).then_some(monitor)
+}
+
+#[cfg(target_os = "windows")]
+fn main_window_monitor() -> Option<HMONITOR> {
+    let title = to_wide(WINDOW_TITLE);
+    let hwnd = unsafe { FindWindowW(None, PCWSTR(title.as_ptr())) };
+    if hwnd.0 == 0 {
+        None
+    } else {
+        monitor_from_window(hwnd)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn taskbar_anchor_from_window(hwnd: HWND) -> Option<TaskbarWidgetAnchor> {
+    unsafe {
+        let mut rect = RECT::default();
+        if GetWindowRect(hwnd, &mut rect).as_bool()
+            && rect.right > rect.left
+            && rect.bottom > rect.top
+        {
+            Some(TaskbarWidgetAnchor { rect })
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn find_taskbar_window_for_monitor(monitor: HMONITOR) -> Option<HWND> {
+    if let Some(primary) = find_primary_taskbar_window() {
+        if monitor_from_window(primary).is_some_and(|candidate| candidate.0 == monitor.0) {
+            return Some(primary);
+        }
+    }
+
+    let mut previous = HWND(0);
+    loop {
+        let hwnd = unsafe {
+            FindWindowExW(
+                HWND(0),
+                previous,
+                w!("Shell_SecondaryTrayWnd"),
+                PCWSTR::null(),
+            )
+        };
+        if hwnd.0 == 0 {
+            break;
+        }
+        if monitor_from_window(hwnd).is_some_and(|candidate| candidate.0 == monitor.0) {
+            return Some(hwnd);
+        }
+        previous = hwnd;
+    }
+
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn monitor_info(monitor: HMONITOR) -> Option<MONITORINFO> {
+    unsafe {
+        let mut info = MONITORINFO::default();
+        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if GetMonitorInfoW(monitor, &mut info).as_bool() {
+            Some(info)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn anchor_from_monitor_info(info: MONITORINFO) -> Option<TaskbarWidgetAnchor> {
+    let monitor = info.rcMonitor;
+    let work = info.rcWork;
+    let scale = current_ui_scale_factor().max(1.0);
+    let fallback_height = ((TASKBAR_TRAFFIC_WIDGET_HEIGHT * scale).round() as i32).max(30);
+
+    let rect = if work.bottom < monitor.bottom {
+        RECT {
+            left: monitor.left,
+            top: work.bottom,
+            right: monitor.right,
+            bottom: monitor.bottom,
+        }
+    } else if work.top > monitor.top {
+        RECT {
+            left: monitor.left,
+            top: monitor.top,
+            right: monitor.right,
+            bottom: work.top,
+        }
+    } else if work.left > monitor.left {
+        RECT {
+            left: monitor.left,
+            top: monitor.top,
+            right: work.left,
+            bottom: monitor.bottom,
+        }
+    } else if work.right < monitor.right {
+        RECT {
+            left: work.right,
+            top: monitor.top,
+            right: monitor.right,
+            bottom: monitor.bottom,
+        }
+    } else {
+        RECT {
+            left: monitor.left,
+            top: monitor.bottom - fallback_height,
+            right: monitor.right,
+            bottom: monitor.bottom,
+        }
+    };
+
+    if rect.right > rect.left && rect.bottom > rect.top {
+        Some(TaskbarWidgetAnchor { rect })
+    } else {
+        None
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn taskbar_widget_anchor_for_monitor(monitor: HMONITOR) -> Option<TaskbarWidgetAnchor> {
+    find_taskbar_window_for_monitor(monitor)
+        .and_then(taskbar_anchor_from_window)
+        .or_else(|| monitor_info(monitor).and_then(anchor_from_monitor_info))
+}
+
+#[cfg(target_os = "windows")]
+fn fallback_taskbar_widget_anchor() -> Option<TaskbarWidgetAnchor> {
+    find_primary_taskbar_window()
+        .and_then(taskbar_anchor_from_window)
+        .or_else(|| main_window_monitor().and_then(taskbar_widget_anchor_for_monitor))
+}
+
+#[cfg(target_os = "windows")]
+fn position_taskbar_traffic_widget(hwnd: HWND, anchor: TaskbarWidgetAnchor) {
+    unsafe {
+        let rect = anchor.rect;
+        let taskbar_width = (rect.right - rect.left).max(1);
+        let taskbar_height = (rect.bottom - rect.top).max(1);
+        let (widget_width, widget_height) =
+            widget_dimensions_for_taskbar(taskbar_width, taskbar_height);
+        let vertical = taskbar_height > taskbar_width;
+        let scale = current_ui_scale_factor().max(1.0);
+        let edge_padding = (8.0 * scale).round() as i32;
+
+        let (x, y) = if vertical {
+            (
+                rect.left + ((taskbar_width - widget_width) / 2).max(edge_padding),
+                rect.top + edge_padding,
+            )
+        } else {
+            (
+                rect.left + edge_padding,
+                rect.top + ((taskbar_height - widget_height) / 2).max(2),
+            )
+        };
+
+        let _ = SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            x,
+            y,
+            widget_width,
+            widget_height,
+            SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW,
+        );
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn register_taskbar_traffic_widget_class() {
+    let _ = TASKBAR_TRAFFIC_WIDGET_CLASS_REGISTERED.get_or_init(|| unsafe {
+        let class_name = to_wide(TASKBAR_TRAFFIC_WIDGET_CLASS);
+        if let Ok(hinstance) = GetModuleHandleW(None) {
+            let wnd_class = WNDCLASSW {
+                lpfnWndProc: Some(taskbar_traffic_widget_wndproc),
+                hInstance: hinstance,
+                hCursor: LoadCursorW(None, IDC_HAND).unwrap_or_default(),
+                lpszClassName: PCWSTR(class_name.as_ptr()),
+                ..Default::default()
+            };
+            let _ = RegisterClassW(&wnd_class);
+        }
+    });
+}
+
+#[cfg(target_os = "windows")]
+fn draw_taskbar_text(
+    hdc: windows::Win32::Graphics::Gdi::HDC,
+    text: &str,
+    mut rect: RECT,
+    flags: DRAW_TEXT_FORMAT,
+    color: COLORREF,
+    font: Option<HFONT>,
+) {
+    unsafe {
+        let old_font = font.map(|font| SelectObject(hdc, font));
+        let _ = SetTextColor(hdc, color);
+        let _ = SetBkMode(hdc, TRANSPARENT);
+        let mut text = to_wide(text);
+        let _ = DrawTextW(
+            hdc,
+            &mut text,
+            &mut rect,
+            flags | DT_SINGLELINE | DT_VCENTER,
+        );
+        if let Some(old_font) = old_font {
+            let _ = SelectObject(hdc, old_font);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn measure_taskbar_text_width(
+    hdc: windows::Win32::Graphics::Gdi::HDC,
+    text: &str,
+    font: Option<HFONT>,
+) -> i32 {
+    let text_wide: Vec<u16> = text.encode_utf16().collect();
+    if text_wide.is_empty() {
+        return 0;
+    }
+
+    unsafe {
+        let old_font = font.map(|font| SelectObject(hdc, font));
+        let mut size = SIZE::default();
+        let width = if GetTextExtentPoint32W(hdc, &text_wide, &mut size).as_bool() {
+            size.cx.max(0)
+        } else {
+            0
+        };
+        if let Some(old_font) = old_font {
+            let _ = SelectObject(hdc, old_font);
+        }
+        width
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn draw_taskbar_speed_row(
+    hdc: windows::Win32::Graphics::Gdi::HDC,
+    arrow: &str,
+    value_text: &str,
+    unit_text: &str,
+    row_rect: RECT,
+    color: COLORREF,
+    arrow_font: Option<HFONT>,
+    text_font: Option<HFONT>,
+) {
+    let gap = measure_taskbar_text_width(hdc, " ", text_font).max(1);
+    let arrow_width = measure_taskbar_text_width(hdc, arrow, arrow_font);
+    let arrow_right = (row_rect.left + arrow_width).min(row_rect.right);
+    draw_taskbar_text(
+        hdc,
+        arrow,
+        RECT {
+            left: row_rect.left,
+            top: row_rect.top,
+            right: arrow_right,
+            bottom: row_rect.bottom,
+        },
+        DT_LEFT,
+        color,
+        arrow_font,
+    );
+
+    let value_left = (arrow_right + gap).min(row_rect.right);
+    let value_width = measure_taskbar_text_width(hdc, value_text, text_font);
+    let value_right = (value_left + value_width).min(row_rect.right);
+    if value_left < value_right {
+        draw_taskbar_text(
+            hdc,
+            value_text,
+            RECT {
+                left: value_left,
+                top: row_rect.top,
+                right: value_right,
+                bottom: row_rect.bottom,
+            },
+            DT_LEFT,
+            color,
+            text_font,
+        );
+    }
+
+    let unit_left = (value_right + gap).min(row_rect.right);
+    if unit_left < row_rect.right {
+        draw_taskbar_text(
+            hdc,
+            unit_text,
+            RECT {
+                left: unit_left,
+                top: row_rect.top,
+                right: row_rect.right,
+                bottom: row_rect.bottom,
+            },
+            DT_LEFT,
+            color,
+            text_font,
+        );
+    }
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn track_taskbar_widget_mouse_leave(hwnd: HWND) {
+    let mut event = TRACKMOUSEEVENT {
+        cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+        dwFlags: TME_LEAVE,
+        hwndTrack: hwnd,
+        dwHoverTime: 0,
+    };
+    let _ = TrackMouseEvent(&mut event);
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn paint_taskbar_traffic_widget(hwnd: HWND) {
+    let snapshot = taskbar_traffic_widget_data()
+        .lock()
+        .map(|guard| guard.clone())
+        .unwrap_or_default();
+
+    let mut paint = PAINTSTRUCT::default();
+    let hdc = BeginPaint(hwnd, &mut paint);
+    if hdc.0 == 0 {
+        return;
+    }
+
+    let mut rect = RECT::default();
+    let _ = GetClientRect(hwnd, &mut rect);
+    let width = (rect.right - rect.left).max(1);
+    let height = (rect.bottom - rect.top).max(1);
+    let transparent_brush = CreateSolidBrush(taskbar_widget_transparent_color());
+    let _ = FillRect(hdc, &rect, transparent_brush);
+
+    let scale = current_ui_scale_factor().max(1.0);
+    let padding = (10.0 * scale).round() as i32;
+    let metrics_width = ((96.0 * scale).round() as i32).min(width / 2).max(74);
+    let graph_right = (width - padding - metrics_width).max(padding + 1);
+    let graph_rect = RECT {
+        left: padding,
+        top: (7.0 * scale).round() as i32,
+        right: graph_right,
+        bottom: height - (7.0 * scale).round() as i32,
+    };
+    let history = snapshot.history;
+    let max_bps = history
+        .iter()
+        .map(|(up, down)| up + down)
+        .fold(snapshot.upload_bps + snapshot.download_bps, f64::max)
+        .max(1.0);
+    let graph_width = (graph_rect.right - graph_rect.left).max(1);
+    let graph_height = (graph_rect.bottom - graph_rect.top).max(1);
+    let bar_slots = TASKBAR_TRAFFIC_HISTORY_CAPACITY.max(1);
+    let bar_width = ((graph_width as f32 / bar_slots as f32).floor() as i32).max(2);
+    let start_index = history
+        .len()
+        .saturating_sub(TASKBAR_TRAFFIC_HISTORY_CAPACITY);
+    let visible_history = &history[start_index..];
+    let slot_offset = bar_slots.saturating_sub(visible_history.len());
+    let graph_brush = CreateSolidBrush(rgb(245, 247, 250));
+
+    for (index, (upload, download)) in visible_history.iter().enumerate() {
+        let slot = slot_offset + index;
+        let x = graph_rect.left + ((slot as i32) * graph_width / bar_slots as i32);
+        let combined = (*upload + *download).max(0.0);
+        if combined <= 0.0 {
+            continue;
+        }
+
+        let bar_height = ((combined / max_bps) * graph_height as f64).round() as i32;
+        let bar_top = (graph_rect.bottom - bar_height).clamp(graph_rect.top, graph_rect.bottom);
+        if bar_top < graph_rect.bottom {
+            let bar_rect = RECT {
+                left: x,
+                top: bar_top,
+                right: (x + bar_width - 1).min(graph_rect.right),
+                bottom: graph_rect.bottom,
+            };
+            let _ = FillRect(hdc, &bar_rect, graph_brush);
+        }
+    }
+
+    let baseline_pen = CreatePen(PS_SOLID, 1, rgb(172, 178, 188));
+    let _ = SelectObject(hdc, baseline_pen);
+    let _ = MoveToEx(hdc, graph_rect.left, graph_rect.bottom, None);
+    let _ = LineTo(hdc, graph_rect.right, graph_rect.bottom);
+
+    let font = create_smooth_ui_font_bold((11.0 * scale).round().max(1.0) as i32);
+    let arrow_font = create_smooth_ui_font((15.0 * scale).round().max(1.0) as i32);
+    let graph_text_gap = measure_taskbar_text_width(hdc, " ", font).max(1);
+    let metrics_rect = RECT {
+        left: (graph_rect.right + graph_text_gap).min(width - padding),
+        top: 0,
+        right: width - padding,
+        bottom: height,
+    };
+    let (down_value, down_unit) = format_taskbar_speed(snapshot.download_bps);
+    let (up_value, up_unit) = format_taskbar_speed(snapshot.upload_bps);
+    draw_taskbar_speed_row(
+        hdc,
+        "\u{2191}",
+        &up_value,
+        up_unit,
+        RECT {
+            left: metrics_rect.left,
+            top: 3,
+            right: metrics_rect.right,
+            bottom: height / 2,
+        },
+        rgb(232, 238, 246),
+        arrow_font,
+        font,
+    );
+    draw_taskbar_speed_row(
+        hdc,
+        "\u{2193}",
+        &down_value,
+        down_unit,
+        RECT {
+            left: metrics_rect.left,
+            top: height / 2,
+            right: metrics_rect.right,
+            bottom: height - 3,
+        },
+        rgb(232, 238, 246),
+        arrow_font,
+        font,
+    );
+
+    if let Some(arrow_font) = arrow_font {
+        let _ = DeleteObject(arrow_font);
+    }
+    if let Some(font) = font {
+        let _ = DeleteObject(font);
+    }
+    let _ = DeleteObject(transparent_brush);
+    let _ = DeleteObject(graph_brush);
+    let _ = DeleteObject(baseline_pen);
+    let _ = EndPaint(hwnd, &paint);
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn taskbar_traffic_widget_wndproc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    match msg {
+        WM_NCHITTEST => LRESULT(HTCLIENT as isize),
+        WM_SETCURSOR => {
+            if let Ok(cursor) = LoadCursorW(None, IDC_HAND) {
+                let _ = SetCursor(cursor);
+            }
+            LRESULT(1)
+        }
+        WM_MOUSEMOVE => {
+            track_taskbar_widget_mouse_leave(hwnd);
+            if !TASKBAR_TRAFFIC_WIDGET_HOVERED.swap(true, Ordering::Relaxed) {
+                let _ = InvalidateRect(hwnd, None, false);
+            }
+            LRESULT(0)
+        }
+        WM_MOUSELEAVE => {
+            if TASKBAR_TRAFFIC_WIDGET_HOVERED.swap(false, Ordering::Relaxed) {
+                let _ = InvalidateRect(hwnd, None, false);
+            }
+            LRESULT(0)
+        }
+        WM_PAINT => {
+            paint_taskbar_traffic_widget(hwnd);
+            LRESULT(0)
+        }
+        WM_ERASEBKGND | WM_GETOBJECT => LRESULT(1),
+        WM_LBUTTONUP => {
+            let title = to_wide(WINDOW_TITLE);
+            let main_hwnd = FindWindowW(None, PCWSTR(title.as_ptr()));
+            if main_hwnd.0 != 0 {
+                let _ = ShowWindow(main_hwnd, SW_RESTORE);
+                let _ = SetForegroundWindow(main_hwnd);
+            }
+            LRESULT(0)
+        }
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -77,21 +736,23 @@ pub(super) fn ensure_notification_shortcut_registered() -> windows::core::Result
 
     let exe_path = std::env::current_exe()
         .map_err(|error| windows_error(format!("current_exe failed: {}", error)))?;
-    let exe_dir = exe_path.parent().ok_or_else(|| {
-        windows_error("current_exe returned a path without a parent directory")
-    })?;
+    let exe_dir = exe_path
+        .parent()
+        .ok_or_else(|| windows_error("current_exe returned a path without a parent directory"))?;
 
     if let Some(parent) = shortcut_path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
-            windows_error(format!("create_dir_all for shortcut directory failed: {}", error))
+            windows_error(format!(
+                "create_dir_all for shortcut directory failed: {}",
+                error
+            ))
         })?;
     }
 
     let com_initialized = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok() };
     let result = (|| -> windows::core::Result<Option<PathBuf>> {
-        let shell_link: IShellLinkW = unsafe {
-            CoCreateInstance(&CLSID_SHELL_LINK, None, CLSCTX_INPROC_SERVER)?
-        };
+        let shell_link: IShellLinkW =
+            unsafe { CoCreateInstance(&CLSID_SHELL_LINK, None, CLSCTX_INPROC_SERVER)? };
 
         let exe_wide = path_to_wide(&exe_path);
         let exe_dir_wide = path_to_wide(exe_dir);
@@ -150,11 +811,7 @@ unsafe fn enable_file_drop(hwnd: HWND) {
     let target_hwnd = if root_hwnd.0 != 0 { root_hwnd } else { hwnd };
 
     enable_file_drop_for_window(target_hwnd);
-    let _ = EnumChildWindows(
-        target_hwnd,
-        Some(enable_file_drop_for_children),
-        LPARAM(0),
-    );
+    let _ = EnumChildWindows(target_hwnd, Some(enable_file_drop_for_children), LPARAM(0));
 }
 
 pub(super) fn open_url(url: &str) {
@@ -238,6 +895,132 @@ unsafe extern "system" fn subclass_wndproc(
 
 impl AppState {
     #[cfg(target_os = "windows")]
+    fn taskbar_widget_anchor(&mut self) -> Option<TaskbarWidgetAnchor> {
+        if let Some(monitor) = main_window_monitor() {
+            self.taskbar_widget_monitor = Some(monitor);
+        }
+
+        self.taskbar_widget_monitor
+            .and_then(taskbar_widget_anchor_for_monitor)
+            .or_else(fallback_taskbar_widget_anchor)
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(super) fn update_taskbar_traffic_widget(&mut self) {
+        set_taskbar_traffic_widget_worker_enabled(self.taskbar_widget_enabled);
+        let anchor = self.taskbar_widget_anchor();
+        let snapshot = TaskbarTrafficWidgetSnapshot {
+            visible: self.service_active && self.taskbar_widget_enabled,
+            upload_bps: self.last_upload_bps,
+            download_bps: self.last_download_bps,
+            history: self
+                .traffic_history
+                .iter()
+                .map(|point| (point.upload_bps, point.download_bps))
+                .collect(),
+        };
+
+        if let Ok(mut guard) = taskbar_traffic_widget_data().lock() {
+            *guard = snapshot.clone();
+        }
+
+        let Some(existing_hwnd) = self.taskbar_widget_window else {
+            if !snapshot.visible {
+                return;
+            }
+            if let Some(anchor) = anchor {
+                self.taskbar_widget_window = self.create_taskbar_traffic_widget(anchor);
+            }
+            if self.taskbar_widget_window.is_none() {
+                return;
+            }
+            return self.update_taskbar_traffic_widget();
+        };
+
+        unsafe {
+            if !IsWindow(existing_hwnd).as_bool() {
+                self.taskbar_widget_window = None;
+                TASKBAR_TRAFFIC_WIDGET_HWND.store(0, Ordering::Relaxed);
+                return self.update_taskbar_traffic_widget();
+            }
+
+            if !snapshot.visible {
+                TASKBAR_TRAFFIC_WIDGET_HOVERED.store(false, Ordering::Relaxed);
+                let _ = ShowWindow(existing_hwnd, SW_HIDE);
+                return;
+            }
+
+            let Some(anchor) = anchor else {
+                TASKBAR_TRAFFIC_WIDGET_HOVERED.store(false, Ordering::Relaxed);
+                let _ = ShowWindow(existing_hwnd, SW_HIDE);
+                return;
+            };
+
+            position_taskbar_traffic_widget(existing_hwnd, anchor);
+            let _ = ShowWindow(existing_hwnd, SW_SHOWNOACTIVATE);
+            let _ = InvalidateRect(existing_hwnd, None, false);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn create_taskbar_traffic_widget(&self, anchor: TaskbarWidgetAnchor) -> Option<HWND> {
+        unsafe {
+            register_taskbar_traffic_widget_class();
+            let hinstance = GetModuleHandleW(None).ok()?;
+            let class_name = to_wide(TASKBAR_TRAFFIC_WIDGET_CLASS);
+            let title = to_wide("vpnfybot traffic");
+            let rect = anchor.rect;
+            let taskbar_width = (rect.right - rect.left).max(1);
+            let taskbar_height = (rect.bottom - rect.top).max(1);
+            let (widget_width, widget_height) =
+                widget_dimensions_for_taskbar(taskbar_width, taskbar_height);
+
+            let hwnd = CreateWindowExW(
+                WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_LAYERED,
+                PCWSTR(class_name.as_ptr()),
+                PCWSTR(title.as_ptr()),
+                WS_POPUP | WS_VISIBLE,
+                rect.left,
+                rect.top,
+                widget_width,
+                widget_height,
+                HWND(0),
+                None,
+                hinstance,
+                None,
+            );
+
+            if hwnd.0 == 0 {
+                None
+            } else {
+                let _ = SetLayeredWindowAttributes(
+                    hwnd,
+                    taskbar_widget_transparent_color(),
+                    0,
+                    LWA_COLORKEY,
+                );
+                position_taskbar_traffic_widget(hwnd, anchor);
+                TASKBAR_TRAFFIC_WIDGET_HWND.store(hwnd.0, Ordering::Relaxed);
+                Some(hwnd)
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(super) fn destroy_taskbar_traffic_widget(&mut self) {
+        set_taskbar_traffic_widget_worker_enabled(false);
+        TASKBAR_TRAFFIC_WIDGET_HOVERED.store(false, Ordering::Relaxed);
+        if let Some(hwnd) = self.taskbar_widget_window.take() {
+            unsafe {
+                if IsWindow(hwnd).as_bool() {
+                    let _ = DestroyWindow(hwnd);
+                }
+            }
+        }
+        TASKBAR_TRAFFIC_WIDGET_HWND.store(0, Ordering::Relaxed);
+    }
+
+    #[cfg(target_os = "windows")]
     #[allow(deprecated)]
     pub(super) fn ensure_tray_subclass(&mut self, frame: &mut Frame) {
         if self.tray_subclassed {
@@ -248,7 +1031,11 @@ impl AppState {
             if let Ok(RawWindowHandle::Win32(handle)) = window_handle.raw_window_handle() {
                 let raw_hwnd = HWND(handle.hwnd.get());
                 let root_hwnd = unsafe { GetAncestor(raw_hwnd, GA_ROOT) };
-                let hwnd = if root_hwnd.0 != 0 { root_hwnd } else { raw_hwnd };
+                let hwnd = if root_hwnd.0 != 0 {
+                    root_hwnd
+                } else {
+                    raw_hwnd
+                };
                 let needs_reset = self.tray_window != Some(hwnd);
                 if needs_reset {
                     if self.tray_icon_added {
@@ -415,7 +1202,10 @@ impl AppState {
     #[cfg(target_os = "windows")]
     pub(super) fn apply_black_window_frame(&self, _frame: &Frame) -> bool {
         unsafe {
-            let title_wide: Vec<u16> = OsStr::new(WINDOW_TITLE).encode_wide().chain(Some(0)).collect();
+            let title_wide: Vec<u16> = OsStr::new(WINDOW_TITLE)
+                .encode_wide()
+                .chain(Some(0))
+                .collect();
             let hwnd = FindWindowW(None, PCWSTR(title_wide.as_ptr()));
             if hwnd.0 != 0 {
                 let color: u32 = 0x000000;
@@ -439,23 +1229,25 @@ impl AppState {
     }
 
     pub(super) fn handle_dropped_files(&mut self, ctx: &egui::Context) {
-        let maybe_path = ctx.input(|input| {
-            input.raw.dropped_files.iter().find_map(|file| {
-                let path = file.path.as_ref()?;
-                let extension = path.extension().and_then(|ext| ext.to_str())?;
-                if extension.eq_ignore_ascii_case("conf") {
-                    Some(path.to_string_lossy().to_string())
-                } else {
-                    None
-                }
+        let maybe_path = ctx
+            .input(|input| {
+                input.raw.dropped_files.iter().find_map(|file| {
+                    let path = file.path.as_ref()?;
+                    let extension = path.extension().and_then(|ext| ext.to_str())?;
+                    if extension.eq_ignore_ascii_case("conf") {
+                        Some(path.to_string_lossy().to_string())
+                    } else {
+                        None
+                    }
+                })
             })
-        }).or_else(|| {
-            DROP_FILE_PATH
-                .get_or_init(|| Mutex::new(None))
-                .lock()
-                .unwrap()
-                .take()
-        });
+            .or_else(|| {
+                DROP_FILE_PATH
+                    .get_or_init(|| Mutex::new(None))
+                    .lock()
+                    .unwrap()
+                    .take()
+            });
 
         let path = match maybe_path {
             Some(path) => path,
@@ -499,9 +1291,8 @@ pub(super) fn show_silent_windows_notification_detached(
     let xml_hstring = HSTRING::from(xml);
     toast_xml.LoadXml(&xml_hstring)?;
     let toast = ToastNotification::CreateToastNotification(&toast_xml)?;
-    let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(
-        NOTIFICATION_APP_ID,
-    ))?;
+    let notifier =
+        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(NOTIFICATION_APP_ID))?;
     notifier.Show(&toast)?;
     Ok(())
 }

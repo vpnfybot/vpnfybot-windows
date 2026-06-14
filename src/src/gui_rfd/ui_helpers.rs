@@ -380,6 +380,10 @@ pub(super) fn create_smooth_ui_font(size_px: i32) -> Option<HFONT> {
     create_smooth_ui_font_with_weight(size_px, 400)
 }
 
+pub(super) fn create_smooth_ui_font_bold(size_px: i32) -> Option<HFONT> {
+    create_smooth_ui_font_with_weight(size_px, 700)
+}
+
 pub(super) fn current_ui_scale_factor() -> f32 {
     unsafe {
         let screen_hwnd = HWND(0);

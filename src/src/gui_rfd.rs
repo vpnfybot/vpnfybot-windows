@@ -5,7 +5,12 @@ fn LOWORD(l: u32) -> u16 {
 }
 #[cfg(target_os = "windows")]
 #[allow(dead_code)]
-unsafe extern "system" fn connect_button_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+unsafe extern "system" fn connect_button_wndproc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
     use windows::Win32::UI::WindowsAndMessaging::*;
     match msg {
         WM_COMMAND => {
@@ -19,15 +24,15 @@ unsafe extern "system" fn connect_button_wndproc(hwnd: HWND, msg: u32, wparam: W
     }
     DefWindowProcW(hwnd, msg, wparam, lparam)
 }
-use eframe::{egui, App, Frame};
 use eframe::icon_data::from_png_bytes;
+use eframe::{egui, App, Frame};
 use image::codecs::gif::GifDecoder;
 use image::AnimationDecoder;
 #[allow(deprecated)]
 use raw_window_handle::{HasRawWindowHandle, HasWindowHandle, RawWindowHandle};
 use resvg::{tiny_skia, usvg};
 use rfd::FileDialog;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -35,55 +40,64 @@ use std::io::{Cursor, Read, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc::{self, Receiver}, Arc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    mpsc::{self, Receiver},
+    Arc, Mutex, OnceLock,
+};
 use std::thread;
 use std::time::{Duration, Instant};
+use windows::core::{w, HSTRING, PCWSTR};
 use windows::Data::Xml::Dom::XmlDocument;
-use windows::core::{HSTRING, PCWSTR, w};
-use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
 use windows::Win32::Foundation::{BOOL, COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
-use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR};
+use windows::Win32::Graphics::Dwm::{
+    DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR,
+};
 use windows::Win32::Graphics::Gdi::{
-    CreateBitmap, CreateFontW, CreateCompatibleBitmap, CreateCompatibleDC,
-    DrawTextW,
-    DeleteObject, DeleteDC, GetDC, GetDeviceCaps, GetDIBits, HFONT, LOGPIXELSY,
-    ReleaseDC, SelectObject, SetBkMode, SetTextColor, BITMAPINFO, BITMAPINFOHEADER,
-    DIB_RGB_COLORS, FillRect, CreateSolidBrush,
-    DT_CENTER, DT_SINGLELINE, DT_VCENTER, TRANSPARENT,
+    CreateBitmap, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW, CreateSolidBrush,
+    DeleteDC, DeleteObject, DrawTextW, FillRect, GetDC, GetDIBits, GetDeviceCaps, ReleaseDC,
+    SelectObject, SetBkMode, SetTextColor, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, DT_CENTER,
+    DT_SINGLELINE, DT_VCENTER, HFONT, LOGPIXELSY, TRANSPARENT,
 };
-use windows::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP, SetCurrentProcessExplicitAppUserModelID, ShellExecuteW, Shell_NotifyIconW, NOTIFYICONDATAW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE};
+use windows::Win32::UI::Shell::{
+    DragAcceptFiles, DragFinish, DragQueryFileW, SetCurrentProcessExplicitAppUserModelID,
+    ShellExecuteW, Shell_NotifyIconW, HDROP, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE,
+    NOTIFYICONDATAW,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
-    AdjustWindowRectEx, CallWindowProcW, ChangeWindowMessageFilterEx, CreateIconIndirect, EnumChildWindows, FindWindowW,
-    DestroyIcon, SendMessageW,
-    GetAncestor, SetForegroundWindow, SetWindowLongPtrW,
-    ShowWindow, GWLP_WNDPROC, HICON, ICONINFO, WINDOW_EX_STYLE, WINDOW_STYLE,
-    GA_ROOT, MSGFLT_ALLOW, WM_APP, WM_COPYDATA, WM_DROPFILES, WM_LBUTTONUP, WM_RBUTTONUP, WM_SETFONT, WM_SIZE, WNDPROC,
-    SIZE_MINIMIZED, SW_HIDE, SW_RESTORE, SW_SHOWNORMAL,
+    AdjustWindowRectEx, CallWindowProcW, ChangeWindowMessageFilterEx, CreateIconIndirect,
+    DestroyIcon, EnumChildWindows, FindWindowW, GetAncestor, SendMessageW, SetForegroundWindow,
+    SetWindowLongPtrW, ShowWindow, GA_ROOT, GWLP_WNDPROC, HICON, ICONINFO, MSGFLT_ALLOW,
+    SIZE_MINIMIZED, SW_HIDE, SW_RESTORE, SW_SHOWNOACTIVATE, SW_SHOWNORMAL, WINDOW_EX_STYLE,
+    WINDOW_STYLE, WM_APP, WM_COPYDATA, WM_DROPFILES, WM_RBUTTONUP, WM_SETFONT, WM_SIZE, WNDPROC,
 };
+use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
 
-use windows::Win32::UI::WindowsAndMessaging::{WM_NCLBUTTONDOWN, HTMINBUTTON};
+use windows::Win32::UI::WindowsAndMessaging::{HTMINBUTTON, WM_NCLBUTTONDOWN};
 
-#[path = "embedded_deps_bytes.rs"]
-mod embedded_deps_bytes;
 #[path = "app_dirs.rs"]
 mod app_dirs;
-#[path = "update_check.rs"]
-mod update_check;
 #[path = "gui_rfd/app_storage.rs"]
 mod app_storage;
-#[path = "gui_rfd/tunnel_service.rs"]
-mod tunnel_service;
-#[path = "gui_rfd/ui_helpers.rs"]
-mod ui_helpers;
+#[path = "gui_rfd/dns_manager.rs"]
+mod dns_manager;
+#[path = "embedded_deps_bytes.rs"]
+mod embedded_deps_bytes;
 #[path = "gui_rfd/error_dialog.rs"]
 mod error_dialog;
 #[path = "gui_rfd/process_editor.rs"]
 mod process_editor;
 #[path = "gui_rfd/site_editor.rs"]
 mod site_editor;
+#[path = "gui_rfd/tunnel_service.rs"]
+mod tunnel_service;
+#[path = "gui_rfd/ui_helpers.rs"]
+mod ui_helpers;
+#[path = "update_check.rs"]
+mod update_check;
 
 use self::app_storage::*;
+use self::dns_manager::*;
 use self::tunnel_service::*;
 use self::ui_helpers::*;
 
@@ -98,6 +112,13 @@ struct TunnelTrafficSample {
     total_bytes: u64,
     tx_bytes: u64,
     rx_bytes: u64,
+    captured_at: Instant,
+}
+
+#[derive(Clone)]
+struct TrafficHistoryPoint {
+    upload_bps: f64,
+    download_bps: f64,
     captured_at: Instant,
 }
 
@@ -124,14 +145,17 @@ const PROCESS_LIST_SCROLLBAR_GAP: i32 = 6;
 const PROCESS_EDITOR_PADDING: i32 = 8;
 const PROCESS_EDITOR_GAP: i32 = 8;
 const PROCESS_SAVE_BUTTON_HEIGHT: i32 = 28;
-const MAIN_WINDOW_CLIENT_WIDTH: i32 = 320;
-const MAIN_WINDOW_CLIENT_HEIGHT: i32 = 380;
+const MAIN_WINDOW_CLIENT_WIDTH: i32 = 300;
+const MAIN_WINDOW_CLIENT_HEIGHT: i32 = 360;
 const SITE_SCROLLBAR_WIDTH: i32 = 8;
 const SITE_TEXT_LINE_HEIGHT: i32 = 20;
 const SITE_WHEEL_STEP: i32 = 3;
 const UI_BUTTON_FONT_SIZE: f32 = 14.0;
 const BUTTON_FONT_FAMILY_NAME: &str = "vpnfy_button_font";
 const TUNNEL_TRAFFIC_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const TASKBAR_TRAFFIC_HISTORY_WINDOW: Duration = Duration::from_secs(60);
+const TASKBAR_TRAFFIC_HISTORY_CAPACITY: usize = 60;
+const AMNEZIA_WIREGUARD_DISPLAY_LABEL: &str = "amnezia-wireguard";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Language {
@@ -202,6 +226,8 @@ impl Language {
                 "Подписка истекает через 48 часов❗️" => "Subscription expires in 48 hours❗️",
                 "Подписка истекает через 24 часа❗️" => "Subscription expires in 24 hours❗️",
                 "Подписка истекла❗️" => "Subscription expired❗️",
+                "Виджет: включено" => "Widget: enabled",
+                "Виджет: выключено" => "Widget: disabled",
                 _ => key,
             },
             Language::Ru => key,
@@ -211,6 +237,7 @@ impl Language {
 
 struct AppState {
     conf_path: Option<String>,
+    imported_conf_is_amnezia_wireguard: bool,
     status: String,
     error_log: Option<String>,
     status_rx: Option<Receiver<ServiceResult>>,
@@ -241,6 +268,7 @@ struct AppState {
     // Latest computed speeds in bytes/sec
     last_upload_bps: f64,
     last_download_bps: f64,
+    traffic_history: VecDeque<TrafficHistoryPoint>,
     upload_icon: Option<egui::TextureHandle>,
     download_icon: Option<egui::TextureHandle>,
     top_image: Option<egui::TextureHandle>,
@@ -259,6 +287,11 @@ struct AppState {
     tray_icon_added: bool,
     tray_window: Option<HWND>,
     tray_icon: Option<HICON>,
+    #[cfg(target_os = "windows")]
+    taskbar_widget_window: Option<HWND>,
+    #[cfg(target_os = "windows")]
+    taskbar_widget_monitor: Option<windows::Win32::Graphics::Gdi::HMONITOR>,
+    taskbar_widget_enabled: bool,
     traffic_opacity: f32,
     import_button_opacity: f32,
     connect_animation_start: Option<Instant>,
@@ -290,6 +323,5 @@ mod app_view;
 #[path = "gui_rfd/app_windows.rs"]
 mod app_windows;
 
-use self::app_runtime::is_elevated;
 pub(crate) use self::app_runtime::app_main;
-
+use self::app_runtime::is_elevated;

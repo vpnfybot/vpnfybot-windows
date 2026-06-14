@@ -1,5 +1,5 @@
-use super::*;
 use super::app_windows::{open_url, show_error_dialog};
+use super::*;
 
 impl App for AppState {
     fn update(&mut self, ctx: &egui::Context, frame: &mut Frame) {
@@ -157,12 +157,7 @@ impl App for AppState {
                             6.0,
                             egui::Stroke::new(
                                 1.0,
-                                egui::Color32::from_rgba_unmultiplied(
-                                    0,
-                                    0,
-                                    0,
-                                    install_hover_alpha,
-                                ),
+                                egui::Color32::from_rgba_unmultiplied(0, 0, 0, install_hover_alpha),
                             ),
                         );
                         #[cfg(target_os = "windows")]
@@ -172,12 +167,8 @@ impl App for AppState {
                             let w_px = (install_rect.width() * ppp).ceil() as usize;
                             let h_px = (install_rect.height() * ppp).ceil() as usize;
                             let key = format!("install_button:{}:{}:{}", label, w_px, h_px);
-                            let text_color = egui::Color32::from_rgba_unmultiplied(
-                                0,
-                                0,
-                                0,
-                                install_hover_alpha,
-                            );
+                            let text_color =
+                                egui::Color32::from_rgba_unmultiplied(0, 0, 0, install_hover_alpha);
                             if let Some(tex) = self.win_text_cache.get(&key) {
                                 ui.painter().image(
                                     tex.id(),
@@ -273,11 +264,14 @@ impl App for AppState {
                                         .and_then(|s| s.to_str())
                                         .unwrap_or_default()
                                         .to_lowercase();
-                                    let cur_no_ext_opt = std::env::current_exe().ok().and_then(|p| {
-                                        p.file_name().and_then(|n| n.to_str()).map(|s| {
-                                            s.trim_end_matches(".exe").to_string().to_lowercase()
-                                        })
-                                    });
+                                    let cur_no_ext_opt =
+                                        std::env::current_exe().ok().and_then(|p| {
+                                            p.file_name().and_then(|n| n.to_str()).map(|s| {
+                                                s.trim_end_matches(".exe")
+                                                    .to_string()
+                                                    .to_lowercase()
+                                            })
+                                        });
                                     let replace_candidate = match &cur_no_ext_opt {
                                         Some(cur_no_ext) => {
                                             asset_stem == *cur_no_ext
@@ -317,9 +311,11 @@ impl App for AppState {
                                                     }
                                                     downloaded += n;
                                                     if let Some(total) = total_opt {
-                                                        let pct = ((downloaded as f64 / total as f64)
+                                                        let pct = ((downloaded as f64
+                                                            / total as f64)
                                                             * 100.0)
-                                                            .round() as usize;
+                                                            .round()
+                                                            as usize;
                                                         progress_atomic.store(
                                                             pct.min(100),
                                                             std::sync::atomic::Ordering::Relaxed,
@@ -354,8 +350,9 @@ impl App for AppState {
                                                     .and_then(|n| n.to_str())
                                                     .unwrap_or_default()
                                                     .to_lowercase();
-                                                let cur_no_ext =
-                                                    current_name.trim_end_matches(".exe").to_string();
+                                                let cur_no_ext = current_name
+                                                    .trim_end_matches(".exe")
+                                                    .to_string();
                                                 let fname_no_ext =
                                                     std::path::Path::new(&downloaded_basename)
                                                         .file_stem()
@@ -373,13 +370,12 @@ impl App for AppState {
                                                     let script_name = format!(
                                                         "vpnfy_update_{}.ps1",
                                                         std::time::SystemTime::now()
-                                                            .duration_since(
-                                                                std::time::UNIX_EPOCH,
-                                                            )
+                                                            .duration_since(std::time::UNIX_EPOCH,)
                                                             .map(|d| d.as_millis())
                                                             .unwrap_or(0u128)
                                                     );
-                                                    let script_path = updates_dir.join(&script_name);
+                                                    let script_path =
+                                                        updates_dir.join(&script_name);
                                                     let installer = downloaded_path
                                                         .display()
                                                         .to_string()
@@ -417,9 +413,7 @@ impl App for AppState {
                                                         "-ExecutionPolicy",
                                                         "Bypass",
                                                         "-File",
-                                                        script_path
-                                                            .to_str()
-                                                            .unwrap_or_default(),
+                                                        script_path.to_str().unwrap_or_default(),
                                                     ]);
                                                     cmd.creation_flags(CREATE_NO_WINDOW);
                                                     if cmd.spawn().is_ok() {
@@ -435,13 +429,12 @@ impl App for AppState {
                                                     let script_name = format!(
                                                         "vpnfy_update_{}.ps1",
                                                         std::time::SystemTime::now()
-                                                            .duration_since(
-                                                                std::time::UNIX_EPOCH,
-                                                            )
+                                                            .duration_since(std::time::UNIX_EPOCH,)
                                                             .map(|d| d.as_millis())
                                                             .unwrap_or(0u128)
                                                     );
-                                                    let script_path = updates_dir.join(&script_name);
+                                                    let script_path =
+                                                        updates_dir.join(&script_name);
                                                     let src = downloaded_path
                                                         .display()
                                                         .to_string()
@@ -500,9 +493,7 @@ impl App for AppState {
                                                         "-ExecutionPolicy",
                                                         "Bypass",
                                                         "-File",
-                                                        script_path
-                                                            .to_str()
-                                                            .unwrap_or_default(),
+                                                        script_path.to_str().unwrap_or_default(),
                                                     ]);
                                                     cmd.creation_flags(CREATE_NO_WINDOW);
                                                     if cmd.spawn().is_ok() {
@@ -528,8 +519,7 @@ impl App for AppState {
                                         }
                                     }
                                 }
-                                downloading_flag
-                                    .store(false, std::sync::atomic::Ordering::Relaxed);
+                                downloading_flag.store(false, std::sync::atomic::Ordering::Relaxed);
                             });
                         }
 
@@ -557,12 +547,7 @@ impl App for AppState {
                             6.0,
                             egui::Stroke::new(
                                 1.0,
-                                egui::Color32::from_rgba_unmultiplied(
-                                    0,
-                                    0,
-                                    0,
-                                    later_hover_alpha,
-                                ),
+                                egui::Color32::from_rgba_unmultiplied(0, 0, 0, later_hover_alpha),
                             ),
                         );
                         #[cfg(target_os = "windows")]
@@ -572,12 +557,8 @@ impl App for AppState {
                             let w_px = (later_rect.width() * ppp).ceil() as usize;
                             let h_px = (later_rect.height() * ppp).ceil() as usize;
                             let key = format!("later_button:{}:{}:{}", label, w_px, h_px);
-                            let text_color = egui::Color32::from_rgba_unmultiplied(
-                                0,
-                                0,
-                                0,
-                                later_hover_alpha,
-                            );
+                            let text_color =
+                                egui::Color32::from_rgba_unmultiplied(0, 0, 0, later_hover_alpha);
                             if let Some(tex) = self.win_text_cache.get(&key) {
                                 ui.painter().image(
                                     tex.id(),
@@ -701,8 +682,11 @@ impl App for AppState {
         }
 
         if self.settings_icon.is_none() {
-            self.settings_icon =
-                load_svg_texture(ctx, "settings_icon", include_bytes!("../icons/settings.svg"));
+            self.settings_icon = load_svg_texture(
+                ctx,
+                "settings_icon",
+                include_bytes!("../icons/settings.svg"),
+            );
         }
         if self.settings_close_icon.is_none() {
             self.settings_close_icon = load_svg_texture(
@@ -719,11 +703,8 @@ impl App for AppState {
             );
         }
         if self.upload_icon.is_none() {
-            self.upload_icon = load_svg_texture(
-                ctx,
-                "upload_icon",
-                include_bytes!("../icons/arrow-up.svg"),
-            );
+            self.upload_icon =
+                load_svg_texture(ctx, "upload_icon", include_bytes!("../icons/arrow-up.svg"));
         }
         if self.download_icon.is_none() {
             self.download_icon = load_svg_texture(
@@ -735,8 +716,9 @@ impl App for AppState {
 
         if let Some(frames) = &self.animated_frames {
             if !frames.is_empty() {
-                let frame_delay =
-                    Duration::from_millis(self.animated_frame_durations[self.animated_frame_index].max(50));
+                let frame_delay = Duration::from_millis(
+                    self.animated_frame_durations[self.animated_frame_index].max(50),
+                );
                 if self.animated_last_frame.elapsed() >= frame_delay {
                     self.animated_frame_index = (self.animated_frame_index + 1) % frames.len();
                     self.animated_last_frame = Instant::now();
@@ -756,19 +738,18 @@ impl App for AppState {
                 base_alpha
             }
         };
-        let apply_button_cursor = |ctx: &egui::Context,
-                                   response: &egui::Response,
-                                   enabled: bool| {
-            if response.is_pointer_button_down_on() {
-                ctx.set_cursor_icon(egui::CursorIcon::Default);
-            } else if response.hovered() {
-                ctx.set_cursor_icon(if enabled {
-                    egui::CursorIcon::PointingHand
-                } else {
-                    egui::CursorIcon::NotAllowed
-                });
-            }
-        };
+        let apply_button_cursor =
+            |ctx: &egui::Context, response: &egui::Response, enabled: bool| {
+                if response.is_pointer_button_down_on() {
+                    ctx.set_cursor_icon(egui::CursorIcon::Default);
+                } else if response.hovered() {
+                    ctx.set_cursor_icon(if enabled {
+                        egui::CursorIcon::PointingHand
+                    } else {
+                        egui::CursorIcon::NotAllowed
+                    });
+                }
+            };
         let button_font = button_font_id();
         let mut is_animating = false;
         if connect_effect_progress > 0.0 && connect_effect_progress < 1.0 {
@@ -799,9 +780,8 @@ impl App for AppState {
                         let w_px = (button_rect.width() * ppp).ceil() as usize;
                         let h_px = (button_rect.height() * ppp).ceil() as usize;
                         let key = format!("settings_icon:{}:{}:{}", "\u{2699}", w_px, h_px);
-                        let text_color = egui::Color32::from_rgba_unmultiplied(
-                            255, 255, 255, icon_alpha,
-                        );
+                        let text_color =
+                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, icon_alpha);
                         if let Some(tex) = self.win_text_cache.get(&key) {
                             ui.painter().image(
                                 tex.id(),
@@ -837,9 +817,7 @@ impl App for AppState {
                                 egui::Align2::CENTER_CENTER,
                                 "\u{2699}",
                                 egui::FontId::proportional(24.0),
-                                egui::Color32::from_rgba_unmultiplied(
-                                    255, 255, 255, icon_alpha,
-                                ),
+                                egui::Color32::from_rgba_unmultiplied(255, 255, 255, icon_alpha),
                             );
                         }
                     }
@@ -888,8 +866,7 @@ impl App for AppState {
                         let ppp = ctx.pixels_per_point();
                         let w_px = (button_rect.width() * ppp).ceil() as usize;
                         let h_px = (button_rect.height() * ppp).ceil() as usize;
-                        let key =
-                            format!("language_button:{}:{}:{}", lang_text, w_px, h_px);
+                        let key = format!("language_button:{}:{}:{}", lang_text, w_px, h_px);
                         if let Some(tex) = self.win_text_cache.get(&key) {
                             ui.painter().image(
                                 tex.id(),
@@ -1003,7 +980,10 @@ impl App for AppState {
                     }
 
                     let controls_locked_by_settings = self.show_settings;
-                    ui.add_space(-4.0);
+                    let ppp = ctx.pixels_per_point();
+                    let import_connect_shift = 4.0 / ppp;
+                    let import_connect_lift = 6.0 / ppp;
+                    ui.add_space(-4.0 + import_connect_shift - import_connect_lift);
                     let import_button_text = if let Some(ref conf) = self.conf_path {
                         Path::new(conf)
                             .file_name()
@@ -1011,7 +991,7 @@ impl App for AppState {
                             .unwrap_or(conf.as_str())
                             .to_string()
                     } else {
-                        self.language.translate("Импорт").to_owned()
+                        "Wireguard / AmneziaWG".to_owned()
                     };
                     let import_button_enabled = !(self.service_running || self.service_active);
                     let import_button_interactive =
@@ -1033,6 +1013,23 @@ impl App for AppState {
                     } else {
                         import_button_alpha
                     };
+                    if self.imported_conf_is_amnezia_wireguard && import_button_alpha > 0 {
+                        let label_alpha = ((render_import_alpha as f32) * 0.82)
+                            .round()
+                            .clamp(0.0, 255.0) as u8;
+                        ui.painter().text(
+                            egui::pos2(button_rect.center().x, button_rect.min.y - 6.0),
+                            egui::Align2::CENTER_BOTTOM,
+                            AMNEZIA_WIREGUARD_DISPLAY_LABEL,
+                            egui::FontId::proportional(13.0),
+                            egui::Color32::from_rgba_unmultiplied(
+                                255,
+                                255,
+                                255,
+                                label_alpha,
+                            ),
+                        );
+                    }
                     if import_button_alpha > 0 {
                         let stroke_width = 2.0;
                         let inner_rect = button_rect.shrink(stroke_width / 2.0);
@@ -1155,7 +1152,7 @@ impl App for AppState {
                     }
                     if import_button_interactive && import_button_response.clicked() {
                         if let Some(path) = FileDialog::new()
-                            .add_filter("WireGuard config", &["conf"])
+                            .add_filter("WireGuard / Amnezia-WireGuard config", &["conf"])
                             .pick_file()
                         {
                             let selected_path = path.display().to_string();
@@ -1164,7 +1161,6 @@ impl App for AppState {
                     }
 
                     let gap = 8.0 / ctx.pixels_per_point();
-                    let ppp = ctx.pixels_per_point();
                     let gap_connect_text = 8.0 / ppp;
                     ui.add_space(gap_connect_text);
 
@@ -1442,7 +1438,7 @@ impl App for AppState {
                         .movable(false)
                         .show(ctx, |ui_area| {
                             let ppp_local = ctx.pixels_per_point();
-                            let icon_size_points = 18.0 / ppp_local;
+                            let icon_size_points = 22.0 / ppp_local;
                             let spacing_points = 6.0 / ppp_local;
                             let added_width_points = 20.0 / ppp_local;
                             let text_str = self.cached_up_display.clone();
@@ -1556,7 +1552,7 @@ impl App for AppState {
                         .movable(false)
                         .show(ctx, |ui_area| {
                             let ppp_local = ctx.pixels_per_point();
-                            let icon_size_points = 18.0 / ppp_local;
+                            let icon_size_points = 22.0 / ppp_local;
                             let spacing_points = 6.0 / ppp_local;
                             let added_width_points = 20.0 / ppp_local;
                             let text_str = self.cached_down_display.clone();
@@ -1693,6 +1689,7 @@ impl App for AppState {
                                     self.last_tunnel_totals = None;
                                     self.last_upload_bps = 0.0;
                                     self.last_download_bps = 0.0;
+                                    self.traffic_history.clear();
                                     self.last_time_display_update = None;
                                     self.cached_time_display.clear();
                                     self.cached_up_display.clear();
@@ -1736,11 +1733,32 @@ impl App for AppState {
                                         self.status = status_text;
                                         ui.ctx().request_repaint();
 
+                                        let tunnel_dns_servers =
+                                            if let Some(conf_path) = self.conf_path.as_deref() {
+                                                match ensure_tunnel_dns(conf_path) {
+                                                    Ok(servers) => servers,
+                                                    Err(error) => {
+                                                        self.status = format!(
+                                                            "DNS override error: {}",
+                                                            error
+                                                        );
+                                                        show_error_dialog(
+                                                            self.language.translate("Ошибка"),
+                                                            &self.status,
+                                                        );
+                                                        tunnel_dns_servers_for_config(conf_path)
+                                                    }
+                                                }
+                                            } else {
+                                                Vec::new()
+                                            };
+
                                         match start_proxybridge(
                                             &selected_processes,
                                             &selected_sites,
                                             proxy_mode,
                                             self.wireproxy_info_addr.as_deref(),
+                                            &tunnel_dns_servers,
                                         ) {
                                             Ok(child_opt) => {
                                                 self.proxybridge_running = true;
@@ -1808,6 +1826,10 @@ impl App for AppState {
                                     }
                                     self.proxybridge_running = false;
                                 }
+
+                                if let Err(error) = restore_tunnel_dns() {
+                                    log::warn!("Failed to restore DNS after tunnel stop: {}", error);
+                                }
                             }
                             if !self.service_active {
                                 if let Some(ref error_log) = self.error_log {
@@ -1849,6 +1871,11 @@ impl App for AppState {
                             self.last_time_display_update = None;
                             is_animating = true;
                         }
+                    }
+
+                    #[cfg(target_os = "windows")]
+                    {
+                        self.update_taskbar_traffic_widget();
                     }
 
                     let target_traffic_opacity = if self.service_active { 1.0 } else { 0.0 };
@@ -2047,6 +2074,11 @@ impl App for AppState {
                                         } else {
                                             self.language.translate("В режиме \"Вся система\" сайты из списка \"Исключенные сайты\" и приложения из списка \"Исключенные приложения\" будут исключены из VPN туннеля")
                                         };
+                                        let widget_button_text = if self.taskbar_widget_enabled {
+                                            self.language.translate("Виджет: включено")
+                                        } else {
+                                            self.language.translate("Виджет: выключено")
+                                        };
                                         let mode_enabled = !self.service_active;
                                         let (settings_rect, _) = ui.allocate_exact_size(
                                             egui::vec2(ui.available_width(), ui.available_height()),
@@ -2071,6 +2103,8 @@ impl App for AppState {
                                         let process_rect = mode_rect
                                             .translate(egui::vec2(0.0, -(button_height + button_spacing)));
                                         let sites_rect = process_rect
+                                            .translate(egui::vec2(0.0, -(button_height + button_spacing)));
+                                        let widget_rect = sites_rect
                                             .translate(egui::vec2(0.0, -(button_height + button_spacing)));
 
                                         let description_width = ((settings_rect.width() * 0.7)
@@ -2119,7 +2153,7 @@ impl App for AppState {
                                         }
                                         let description_top = settings_rect.top();
                                         let description_bottom =
-                                            (sites_rect.top() - button_spacing).max(description_top);
+                                            (widget_rect.top() - button_spacing).max(description_top);
                                         let description_center_y = description_top
                                             + ((description_bottom - description_top) * 0.5);
                                         let line_spacing = 2.0;
@@ -2161,21 +2195,12 @@ impl App for AppState {
                                                 button_alpha_val,
                                             )
                                         };
-                                        let text_color = if self.proxy_mode_toggle {
-                                            egui::Color32::from_rgba_unmultiplied(
-                                                0,
-                                                0,
-                                                0,
-                                                button_alpha_val,
-                                            )
-                                        } else {
-                                            egui::Color32::from_rgba_unmultiplied(
-                                                255,
-                                                255,
-                                                255,
-                                                button_alpha_val,
-                                            )
-                                        };
+                                        let text_color = egui::Color32::from_rgba_unmultiplied(
+                                            0,
+                                            0,
+                                            0,
+                                            button_alpha_val,
+                                        );
                                         ui.painter().rect_filled(mode_rect, 6.0, button_fill);
                                         #[cfg(target_os = "windows")]
                                         {
@@ -2238,6 +2263,107 @@ impl App for AppState {
                                         apply_button_cursor(ctx, &mode_response, mode_enabled);
                                         if mode_response.clicked() && mode_enabled {
                                             self.proxy_mode_toggle = !self.proxy_mode_toggle;
+                                        }
+
+                                        let widget_response = ui.interact(
+                                            widget_rect,
+                                            ui.id().with("settings_taskbar_widget_button"),
+                                            egui::Sense::click(),
+                                        );
+                                        let widget_alpha_val = button_alpha(&widget_response, 255);
+                                        let widget_fill = if self.taskbar_widget_enabled {
+                                            egui::Color32::from_rgba_unmultiplied(
+                                                255,
+                                                255,
+                                                255,
+                                                widget_alpha_val,
+                                            )
+                                        } else {
+                                            egui::Color32::from_rgba_unmultiplied(
+                                                180,
+                                                80,
+                                                80,
+                                                widget_alpha_val,
+                                            )
+                                        };
+                                        let widget_text_color = egui::Color32::from_rgba_unmultiplied(
+                                            0,
+                                            0,
+                                            0,
+                                            widget_alpha_val,
+                                        );
+                                        ui.painter().rect_filled(widget_rect, 6.0, widget_fill);
+                                        #[cfg(target_os = "windows")]
+                                        {
+                                            let ppp = ctx.pixels_per_point();
+                                            let w_px = (widget_rect.width() * ppp).ceil() as usize;
+                                            let h_px = (widget_rect.height() * ppp).ceil() as usize;
+                                            let key = format!(
+                                                "settings_taskbar_widget:{}:{}:{}",
+                                                widget_button_text, w_px, h_px
+                                            );
+
+                                            if let Some(tex) = self.win_text_cache.get(&key) {
+                                                ui.painter().image(
+                                                    tex.id(),
+                                                    widget_rect,
+                                                    egui::Rect::from_min_max(
+                                                        egui::pos2(0.0, 0.0),
+                                                        egui::pos2(1.0, 1.0),
+                                                    ),
+                                                    egui::Color32::WHITE,
+                                                );
+                                            } else if let Some(tex) = win_text_to_texture(
+                                                ctx,
+                                                &key,
+                                                widget_button_text,
+                                                self.button_hfont,
+                                                widget_text_color,
+                                                w_px,
+                                                h_px,
+                                            ) {
+                                                self.win_text_cache.insert(key.clone(), tex.clone());
+                                                ui.painter().image(
+                                                    tex.id(),
+                                                    widget_rect,
+                                                    egui::Rect::from_min_max(
+                                                        egui::pos2(0.0, 0.0),
+                                                        egui::pos2(1.0, 1.0),
+                                                    ),
+                                                    egui::Color32::WHITE,
+                                                );
+                                            } else {
+                                                ui.painter().text(
+                                                    widget_rect.center(),
+                                                    egui::Align2::CENTER_CENTER,
+                                                    widget_button_text,
+                                                    button_font.clone(),
+                                                    widget_text_color,
+                                                );
+                                            }
+                                        }
+                                        #[cfg(not(target_os = "windows"))]
+                                        {
+                                            ui.painter().text(
+                                                widget_rect.center(),
+                                                egui::Align2::CENTER_CENTER,
+                                                widget_button_text,
+                                                button_font.clone(),
+                                                widget_text_color,
+                                            );
+                                        }
+                                        apply_button_cursor(ctx, &widget_response, true);
+                                        if widget_response.clicked() {
+                                            self.taskbar_widget_enabled = !self.taskbar_widget_enabled;
+                                            save_taskbar_widget_enabled(self.taskbar_widget_enabled);
+                                            #[cfg(target_os = "windows")]
+                                            {
+                                                if self.taskbar_widget_enabled {
+                                                    self.update_taskbar_traffic_widget();
+                                                } else {
+                                                    self.destroy_taskbar_traffic_widget();
+                                                }
+                                            }
                                         }
 
                                         let process_response = ui.interact(
@@ -2537,7 +2663,7 @@ impl App for AppState {
                         let ppp = ctx.pixels_per_point();
                         let extra_px = 20.0f32;
                         let extra_points = extra_px / ppp;
-                        let extra_y_px = 8.0f32;
+                        let extra_y_px = 12.0f32;
                         let extra_y_points = extra_y_px / ppp;
                         let widget_size = egui::vec2(galley.size().x + extra_points, galley.size().y);
                         let (link_rect, response) = ui.allocate_exact_size(
@@ -2650,7 +2776,15 @@ impl App for AppState {
             self.proxybridge_running = false;
         }
 
+        if let Err(error) = restore_tunnel_dns() {
+            log::warn!("Failed to restore DNS on app exit: {}", error);
+        }
+
         self.remove_tray_icon();
+        #[cfg(target_os = "windows")]
+        {
+            self.destroy_taskbar_traffic_widget();
+        }
         if let Some(font) = self.button_hfont.take() {
             unsafe {
                 let _ = DeleteObject(font);

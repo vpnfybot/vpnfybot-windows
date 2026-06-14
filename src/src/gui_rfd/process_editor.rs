@@ -2,13 +2,15 @@ use std::collections::BTreeSet;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
-use windows::core::{PCWSTR, w};
+use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{BOOL, COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
-use windows::Win32::Graphics::Dwm::{DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DwmSetWindowAttribute};
+use windows::Win32::Graphics::Dwm::{
+    DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR,
+};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CreatePen, CreateSolidBrush, DT_CENTER, DT_SINGLELINE, DT_VCENTER,
-    DeleteObject, DrawTextW, EndPaint, HDC, HFONT, InvalidateRect, PAINTSTRUCT, PS_SOLID,
-    RoundRect, SelectObject, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT,
+    BeginPaint, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, InvalidateRect,
+    RoundRect, SelectObject, SetBkColor, SetBkMode, SetTextColor, DT_CENTER, DT_SINGLELINE,
+    DT_VCENTER, HDC, HFONT, PAINTSTRUCT, PS_SOLID, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, ODS_DISABLED, ODS_SELECTED};
@@ -16,25 +18,24 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, ReleaseCapture, SetCapture, SetFocus, VK_LBUTTON,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    BS_OWNERDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyIcon,
-    DestroyWindow, DispatchMessageW, GCLP_HBRBACKGROUND, GWLP_USERDATA, GetClassLongPtrW,
-    GetClientRect, GetMessageW, GetWindowLongPtrW, HICON, HMENU, IDC_ARROW, IDC_HAND,
-    LoadCursorW, MSG, MoveWindow, PostQuitMessage, RegisterClassW, SIZE_MINIMIZED, SW_SHOW,
-    SendMessageW, SetCursor, SetWindowLongPtrW, ShowWindow, TranslateMessage,
-    WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE, WM_COMMAND, WM_CTLCOLORBTN, WM_DESTROY,
-    WM_DRAWITEM, WM_ERASEBKGND, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
-    WM_MOUSEWHEEL, WM_PAINT, WM_SETCURSOR, WM_SETICON, WM_SIZE, WNDCLASSW, WS_CHILD,
-    WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME, WS_VISIBLE,
+    CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow, DispatchMessageW,
+    GetClassLongPtrW, GetClientRect, GetMessageW, GetWindowLongPtrW, LoadCursorW, MoveWindow,
+    PostQuitMessage, RegisterClassW, SendMessageW, SetCursor, SetWindowLongPtrW, ShowWindow,
+    TranslateMessage, BS_OWNERDRAW, CW_USEDEFAULT, GCLP_HBRBACKGROUND, GWLP_USERDATA, HICON, HMENU,
+    IDC_ARROW, IDC_HAND, MSG, SIZE_MINIMIZED, SW_SHOW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE,
+    WM_COMMAND, WM_CTLCOLORBTN, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT, WM_SETCURSOR, WM_SETICON, WM_SIZE,
+    WNDCLASSW, WS_CHILD, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME, WS_VISIBLE,
 };
 
 use super::{
-    MAIN_WINDOW_CLIENT_HEIGHT, MAIN_WINDOW_CLIENT_WIDTH, PROCESS_EDITOR_GAP,
-    PROCESS_EDITOR_PADDING, PROCESS_LIST_CLASS, PROCESS_LIST_ITEM_HEIGHT,
+    adjusted_window_size, apply_smooth_font, create_button_ui_font, create_smooth_ui_font,
+    external_editor_is_open, get_running_processes, grayscale_color, load_png_icon_handle,
+    mouse_point_from_lparam, rect_contains_point, show_existing_external_editor, to_wide,
+    MAIN_WINDOW_CLIENT_HEIGHT, MAIN_WINDOW_CLIENT_WIDTH, PROCESSES_EDITOR_CLASS,
+    PROCESS_EDITOR_GAP, PROCESS_EDITOR_PADDING, PROCESS_LIST_CLASS, PROCESS_LIST_ITEM_HEIGHT,
     PROCESS_LIST_SCROLLBAR_GAP, PROCESS_LIST_WHEEL_STEP, PROCESS_SAVE_BUTTON_HEIGHT,
-    PROCESSES_EDITOR_CLASS, SITE_SCROLLBAR_WIDTH, adjusted_window_size,
-    apply_smooth_font, create_button_ui_font, create_smooth_ui_font, external_editor_is_open,
-    get_running_processes, grayscale_color, load_png_icon_handle, mouse_point_from_lparam,
-    rect_contains_point, show_existing_external_editor, to_wide,
+    SITE_SCROLLBAR_WIDTH,
 };
 
 struct ProcessEditorState {
@@ -76,19 +77,15 @@ pub(super) fn open_external(
         } else {
             process_items
         };
-        process_items.sort();
-        process_items.dedup();
 
         let class_name = to_wide(PROCESSES_EDITOR_CLASS);
         let list_class_name = to_wide(PROCESS_LIST_CLASS);
         let title_text = to_wide(&window_title);
         let save_text = to_wide(&save_label);
         let selected_processes_set: BTreeSet<String> = selected_processes.into_iter().collect();
-        let selected_indices: BTreeSet<usize> = process_items
-            .iter()
-            .enumerate()
-            .filter_map(|(index, process_name)| selected_processes_set.contains(process_name).then_some(index))
-            .collect();
+        sort_process_items_with_selected_first(&mut process_items, &selected_processes_set);
+        let selected_indices =
+            selected_indices_for_process_items(&process_items, &selected_processes_set);
         let ui_font = create_smooth_ui_font(16);
         let button_font = create_button_ui_font();
         let window_icon = load_png_icon_handle(include_bytes!("../../../src/gifs/vpnfy.png"));
@@ -265,6 +262,56 @@ unsafe fn send_selected_processes_and_close(hwnd: HWND) {
     DestroyWindow(hwnd);
 }
 
+fn sort_process_items_with_selected_first(
+    process_items: &mut Vec<String>,
+    selected_processes: &BTreeSet<String>,
+) {
+    process_items.sort_by(|left, right| {
+        let left_selected = selected_processes.contains(left);
+        let right_selected = selected_processes.contains(right);
+
+        right_selected
+            .cmp(&left_selected)
+            .then_with(|| left.to_ascii_lowercase().cmp(&right.to_ascii_lowercase()))
+            .then_with(|| left.cmp(right))
+    });
+    process_items.dedup();
+}
+
+fn selected_indices_for_process_items(
+    process_items: &[String],
+    selected_processes: &BTreeSet<String>,
+) -> BTreeSet<usize> {
+    process_items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, process_name)| {
+            selected_processes.contains(process_name).then_some(index)
+        })
+        .collect()
+}
+
+fn selected_process_names(state: &ProcessEditorState) -> BTreeSet<String> {
+    state
+        .selected_indices
+        .iter()
+        .filter_map(|index| state.items.get(*index).cloned())
+        .collect()
+}
+
+unsafe fn apply_selected_process_sort(
+    hwnd: HWND,
+    state: &mut ProcessEditorState,
+    selected_processes: &BTreeSet<String>,
+) {
+    sort_process_items_with_selected_first(&mut state.items, selected_processes);
+    state.selected_indices = selected_indices_for_process_items(&state.items, selected_processes);
+    state.scroll_index = 0;
+    state.hovered_item = None;
+    state.pressed_item = None;
+    let _ = InvalidateRect(hwnd, None, true);
+}
+
 unsafe fn draw_process_save_button(hwnd: HWND, draw_item: &DRAWITEMSTRUCT) {
     if (draw_item.itemState.0 & ODS_SELECTED.0) != 0 {
         if let Ok(cursor) = LoadCursorW(None, IDC_ARROW) {
@@ -353,7 +400,10 @@ unsafe fn process_list_visible_count(hwnd: HWND) -> usize {
 }
 
 unsafe fn process_list_max_scroll(hwnd: HWND, state: &ProcessEditorState) -> usize {
-    state.items.len().saturating_sub(process_list_visible_count(hwnd))
+    state
+        .items
+        .len()
+        .saturating_sub(process_list_visible_count(hwnd))
 }
 
 unsafe fn process_list_content_rect(hwnd: HWND) -> RECT {
@@ -362,9 +412,11 @@ unsafe fn process_list_content_rect(hwnd: HWND) -> RECT {
 
     let left = PROCESS_EDITOR_PADDING;
     let top = PROCESS_EDITOR_PADDING;
-    let right =
-        (client_rect.right - PROCESS_EDITOR_PADDING - SITE_SCROLLBAR_WIDTH - PROCESS_LIST_SCROLLBAR_GAP)
-            .max(left + 1);
+    let right = (client_rect.right
+        - PROCESS_EDITOR_PADDING
+        - SITE_SCROLLBAR_WIDTH
+        - PROCESS_LIST_SCROLLBAR_GAP)
+        .max(left + 1);
     let bottom = (client_rect.bottom - PROCESS_EDITOR_PADDING).max(top + PROCESS_LIST_ITEM_HEIGHT);
 
     RECT {
@@ -471,9 +523,10 @@ unsafe fn layout_process_editor_controls(hwnd: HWND, state: &mut ProcessEditorSt
     let client_height = (client_rect.bottom - client_rect.top)
         .max(PROCESS_EDITOR_PADDING * 2 + PROCESS_SAVE_BUTTON_HEIGHT + PROCESS_EDITOR_GAP + 1);
     let content_width = (client_width - PROCESS_EDITOR_PADDING * 2).max(1);
-    let save_y =
-        (client_height - PROCESS_EDITOR_PADDING - PROCESS_SAVE_BUTTON_HEIGHT).max(PROCESS_EDITOR_PADDING);
-    let list_height = (save_y - PROCESS_EDITOR_GAP - PROCESS_EDITOR_PADDING).max(PROCESS_LIST_ITEM_HEIGHT);
+    let save_y = (client_height - PROCESS_EDITOR_PADDING - PROCESS_SAVE_BUTTON_HEIGHT)
+        .max(PROCESS_EDITOR_PADDING);
+    let list_height =
+        (save_y - PROCESS_EDITOR_GAP - PROCESS_EDITOR_PADDING).max(PROCESS_LIST_ITEM_HEIGHT);
 
     let _ = MoveWindow(
         state.list_hwnd,
@@ -492,7 +545,9 @@ unsafe fn layout_process_editor_controls(hwnd: HWND, state: &mut ProcessEditorSt
         BOOL(1),
     );
 
-    state.scroll_index = state.scroll_index.min(process_list_max_scroll(state.list_hwnd, state));
+    state.scroll_index = state
+        .scroll_index
+        .min(process_list_max_scroll(state.list_hwnd, state));
 }
 
 unsafe fn draw_process_list(hwnd: HWND, hdc: HDC) {
@@ -681,10 +736,11 @@ unsafe extern "system" fn process_list_wndproc(
                         let thumb_height = (thumb_rect.bottom - thumb_rect.top).max(1);
                         let travel = ((track_rect.bottom - track_rect.top) - thumb_height).max(0);
                         if travel > 0 {
-                            let thumb_top =
-                                (y - state.scrollbar_drag_offset).clamp(track_rect.top, track_rect.bottom - thumb_height);
+                            let thumb_top = (y - state.scrollbar_drag_offset)
+                                .clamp(track_rect.top, track_rect.bottom - thumb_height);
                             let max_scroll = process_list_max_scroll(hwnd, state);
-                            let target = (((thumb_top - track_rect.top) as usize) * max_scroll) / (travel as usize);
+                            let target = (((thumb_top - track_rect.top) as usize) * max_scroll)
+                                / (travel as usize);
                             process_list_scroll_to(hwnd, state, target);
                         }
                         return LRESULT(0);
@@ -714,10 +770,11 @@ unsafe extern "system" fn process_list_wndproc(
                         let thumb_height = (thumb_rect.bottom - thumb_rect.top).max(1);
                         let travel = ((track_rect.bottom - track_rect.top) - thumb_height).max(0);
                         if travel > 0 {
-                            let thumb_top =
-                                (y - thumb_height / 2).clamp(track_rect.top, track_rect.bottom - thumb_height);
+                            let thumb_top = (y - thumb_height / 2)
+                                .clamp(track_rect.top, track_rect.bottom - thumb_height);
                             let max_scroll = process_list_max_scroll(hwnd, state);
-                            let target = (((thumb_top - track_rect.top) as usize) * max_scroll) / (travel as usize);
+                            let target = (((thumb_top - track_rect.top) as usize) * max_scroll)
+                                / (travel as usize);
                             process_list_scroll_to(hwnd, state, target);
                         }
                         return LRESULT(0);
@@ -743,8 +800,12 @@ unsafe extern "system" fn process_list_wndproc(
                     let released_item = process_list_item_from_lparam(hwnd, state, lparam);
                     if let Some(pressed_item) = state.pressed_item {
                         if Some(pressed_item) == released_item {
-                            if !state.selected_indices.insert(pressed_item) {
-                                state.selected_indices.remove(&pressed_item);
+                            if let Some(process_name) = state.items.get(pressed_item).cloned() {
+                                let mut selected_processes = selected_process_names(state);
+                                if !selected_processes.insert(process_name.clone()) {
+                                    selected_processes.remove(&process_name);
+                                }
+                                apply_selected_process_sort(hwnd, state, &selected_processes);
                             }
                         }
                     }
@@ -760,7 +821,8 @@ unsafe extern "system" fn process_list_wndproc(
                     return LRESULT(0);
                 }
                 WM_SIZE => {
-                    state.scroll_index = state.scroll_index.min(process_list_max_scroll(hwnd, state));
+                    state.scroll_index =
+                        state.scroll_index.min(process_list_max_scroll(hwnd, state));
                     let _ = InvalidateRect(hwnd, None, true);
                     return LRESULT(0);
                 }
@@ -832,7 +894,9 @@ unsafe extern "system" fn process_editor_wndproc(
             if !ptr.is_null() {
                 let state = &mut *ptr;
                 let hovered_child = HWND(wparam.0 as isize);
-                if hovered_child != state.list_hwnd && (state.hovered_item.is_some() || state.pressed_item.is_some()) {
+                if hovered_child != state.list_hwnd
+                    && (state.hovered_item.is_some() || state.pressed_item.is_some())
+                {
                     state.hovered_item = None;
                     state.pressed_item = None;
                     let _ = InvalidateRect(state.list_hwnd, None, false);

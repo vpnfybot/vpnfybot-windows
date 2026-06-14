@@ -141,6 +141,29 @@ pub(super) fn load_proxy_mode() -> bool {
     false
 }
 
+pub(super) fn save_taskbar_widget_enabled(enabled: bool) {
+    if let Some(path) = get_config_storage_path() {
+        let mut widget_file = path.clone();
+        widget_file.set_file_name("taskbar_widget.txt");
+        let state = if enabled { "enabled" } else { "disabled" };
+        let _ = fs::write(widget_file, state);
+    }
+}
+
+pub(super) fn load_taskbar_widget_enabled() -> bool {
+    if let Some(path) = get_config_storage_path() {
+        let mut widget_file = path.clone();
+        widget_file.set_file_name("taskbar_widget.txt");
+        if let Ok(content) = fs::read_to_string(widget_file) {
+            return !matches!(
+                content.trim().to_lowercase().as_str(),
+                "disabled" | "off" | "false" | "0"
+            );
+        }
+    }
+    true
+}
+
 pub(super) fn save_language(language: Language) {
     if let Some(path) = get_config_storage_path() {
         let mut lang_file = path.clone();

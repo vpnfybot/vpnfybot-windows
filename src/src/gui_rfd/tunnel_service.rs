@@ -46,8 +46,12 @@ fn save_config_to_cache(conf_path: &str) {
 }
 
 pub(super) fn allocate_wireproxy_info_addr() -> Result<String, String> {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0")
-        .map_err(|e| format!("Не удалось выделить локальный порт для метрик wireproxy: {}", e))?;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| {
+        format!(
+            "Не удалось выделить локальный порт для метрик wireproxy: {}",
+            e
+        )
+    })?;
     let addr = listener
         .local_addr()
         .map_err(|e| format!("Не удалось определить адрес метрик wireproxy: {}", e))?;
@@ -57,7 +61,8 @@ pub(super) fn allocate_wireproxy_info_addr() -> Result<String, String> {
 
 pub(super) fn fetch_wireproxy_metrics(info_addr: &str) -> Option<String> {
     let socket_addr: SocketAddr = info_addr.parse().ok()?;
-    let mut stream = std::net::TcpStream::connect_timeout(&socket_addr, Duration::from_millis(250)).ok()?;
+    let mut stream =
+        std::net::TcpStream::connect_timeout(&socket_addr, Duration::from_millis(250)).ok()?;
     let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
     let _ = stream.set_write_timeout(Some(Duration::from_millis(250)));
 
@@ -83,7 +88,10 @@ pub(super) fn parse_wireproxy_metrics_total_bytes(metrics: &str) -> Option<u64> 
             continue;
         };
 
-        if !matches!(key.trim(), "tx_bytes" | "rx_bytes" | "transfer_tx" | "transfer_rx") {
+        if !matches!(
+            key.trim(),
+            "tx_bytes" | "rx_bytes" | "transfer_tx" | "transfer_rx"
+        ) {
             continue;
         }
 
@@ -308,7 +316,10 @@ where
             .with_cmd(UpdateKind::OnlyIfNotSet),
     );
 
-    system.processes().values().any(|process| predicate(process))
+    system
+        .processes()
+        .values()
+        .any(|process| predicate(process))
 }
 
 fn wait_until_processes_exit<F>(predicate: F, timeout: Duration) -> bool
@@ -396,7 +407,11 @@ pub(super) fn create_and_start_service(conf: &str) -> ServiceResult {
     for line in config_content.lines() {
         let processed_line = if line.starts_with("Address =") {
             if let Some(ipv4_part) = line.split(',').next() {
-                ipv4_part.replace("/24", "/32").replace("/25", "/32").replace("/23", "/32").replace("/22", "/32")
+                ipv4_part
+                    .replace("/24", "/32")
+                    .replace("/25", "/32")
+                    .replace("/23", "/32")
+                    .replace("/22", "/32")
             } else {
                 line.to_string()
             }
@@ -453,7 +468,10 @@ pub(super) fn create_and_start_service(conf: &str) -> ServiceResult {
 
     if super::is_elevated() {
         if let Err(error) = super::app_runtime::ensure_firewall_rules() {
-            log::warn!("Не удалось установить правила брандмауэра перед запуском wireproxy: {}", error);
+            log::warn!(
+                "Не удалось установить правила брандмауэра перед запуском wireproxy: {}",
+                error
+            );
         }
     }
 
@@ -473,7 +491,8 @@ pub(super) fn create_and_start_service(conf: &str) -> ServiceResult {
             };
         }
 
-        if let Err(e) = wait_for_wireproxy_start(&wireproxy_info_addr, WIREPROXY_START_WAIT_TIMEOUT) {
+        if let Err(e) = wait_for_wireproxy_start(&wireproxy_info_addr, WIREPROXY_START_WAIT_TIMEOUT)
+        {
             return ServiceResult {
                 message: e.clone(),
                 active: false,
@@ -485,10 +504,13 @@ pub(super) fn create_and_start_service(conf: &str) -> ServiceResult {
         save_config_to_cache(conf);
 
         return ServiceResult {
-            message: format!("Wireproxy запущен для конфига {}", Path::new(conf)
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("tunnel")),
+            message: format!(
+                "Wireproxy запущен для конфига {}",
+                Path::new(conf)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("tunnel")
+            ),
             active: true,
             error_log: None,
             wireproxy_info_addr: Some(wireproxy_info_addr),
@@ -496,7 +518,8 @@ pub(super) fn create_and_start_service(conf: &str) -> ServiceResult {
     }
 
     let mut wire_cmd = std::process::Command::new(&wireproxy_exe);
-    wire_cmd.arg("-c")
+    wire_cmd
+        .arg("-c")
         .arg(runtime_config_path.to_str().unwrap())
         .arg("--info")
         .arg(&wireproxy_info_addr)
@@ -510,7 +533,9 @@ pub(super) fn create_and_start_service(conf: &str) -> ServiceResult {
 
     match wire_cmd.spawn() {
         Ok(mut child) => {
-            if let Err(e) = wait_for_wireproxy_start(&wireproxy_info_addr, WIREPROXY_START_WAIT_TIMEOUT) {
+            if let Err(e) =
+                wait_for_wireproxy_start(&wireproxy_info_addr, WIREPROXY_START_WAIT_TIMEOUT)
+            {
                 let _ = child.kill();
                 let _ = child.wait();
                 return ServiceResult {
@@ -524,29 +549,36 @@ pub(super) fn create_and_start_service(conf: &str) -> ServiceResult {
             save_config_to_cache(conf);
 
             ServiceResult {
-                message: format!("Wireproxy запущен для конфига {}", Path::new(conf)
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("tunnel")),
+                message: format!(
+                    "Wireproxy запущен для конфига {}",
+                    Path::new(conf)
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("tunnel")
+                ),
                 active: true,
                 error_log: None,
                 wireproxy_info_addr: Some(wireproxy_info_addr),
             }
         }
-        Err(e) => {
-            ServiceResult {
-                message: format!("Не удалось запустить wireproxy: {}", e),
-                active: false,
-                error_log: Some(format!("Ошибка запуска wireproxy: {}", e)),
-                wireproxy_info_addr: None,
-            }
-        }
+        Err(e) => ServiceResult {
+            message: format!("Не удалось запустить wireproxy: {}", e),
+            active: false,
+            error_log: Some(format!("Ошибка запуска wireproxy: {}", e)),
+            wireproxy_info_addr: None,
+        },
     }
 }
 
 pub(super) fn stop_and_delete_service(conf: &str) -> ServiceResult {
-    let config_path = Path::new(conf).canonicalize().ok().map(|p| p.to_string_lossy().to_string());
-    let temp_config_path = super::managed_cache_dir().join("vpnfy_wireproxy_temp.conf").to_string_lossy().to_string();
+    let config_path = Path::new(conf)
+        .canonicalize()
+        .ok()
+        .map(|p| p.to_string_lossy().to_string());
+    let temp_config_path = super::managed_cache_dir()
+        .join("vpnfy_wireproxy_temp.conf")
+        .to_string_lossy()
+        .to_string();
 
     let matches_target_process = |process: &sysinfo::Process| {
         if !process_name_matches(process, "wireproxy.exe") {
@@ -555,7 +587,9 @@ pub(super) fn stop_and_delete_service(conf: &str) -> ServiceResult {
 
         let has_matching_config = process.cmd().iter().any(|arg| {
             let arg_str = arg.to_string_lossy();
-            config_path.as_ref().map_or(false, |cp| arg_str.contains(cp))
+            config_path
+                .as_ref()
+                .map_or(false, |cp| arg_str.contains(cp))
                 || arg_str.contains(&temp_config_path)
         });
 
@@ -687,7 +721,12 @@ fn is_ipv4_filter_pattern(value: &str) -> bool {
             .all(|ch| ch.is_ascii_digit() || matches!(ch, '.' | '*' | '-' | ';' | ',' | ' '))
 }
 
-fn build_site_rules(selected_sites: &[String], action: &str) -> (Vec<String>, Vec<String>) {
+fn build_site_rules_with_options(
+    selected_sites: &[String],
+    ports: &str,
+    protocol: &str,
+    action: &str,
+) -> (Vec<String>, Vec<String>) {
     let mut rules = Vec::new();
     let mut unresolved_sites = Vec::new();
 
@@ -703,7 +742,10 @@ fn build_site_rules(selected_sites: &[String], action: &str) -> (Vec<String>, Ve
                 .collect::<Vec<_>>()
                 .join(";");
             if !host_filter.is_empty() {
-                rules.push(format!("*:{}:*:BOTH:{}", host_filter, action));
+                rules.push(format!(
+                    "*:{}:{}:{}:{}",
+                    host_filter, ports, protocol, action
+                ));
             }
             continue;
         }
@@ -723,8 +765,10 @@ fn build_site_rules(selected_sites: &[String], action: &str) -> (Vec<String>, Ve
         }
 
         rules.push(format!(
-            "*:{}:*:BOTH:{}",
+            "*:{}:{}:{}:{}",
             resolved_ips.into_iter().collect::<Vec<_>>().join(";"),
+            ports,
+            protocol,
             action
         ));
     }
@@ -732,7 +776,16 @@ fn build_site_rules(selected_sites: &[String], action: &str) -> (Vec<String>, Ve
     (rules, unresolved_sites)
 }
 
-pub(super) fn format_proxybridge_status(process_count: usize, site_count: usize, selected_apps_only: bool, started: bool) -> String {
+fn build_site_rules(selected_sites: &[String], action: &str) -> (Vec<String>, Vec<String>) {
+    build_site_rules_with_options(selected_sites, "*", "BOTH", action)
+}
+
+pub(super) fn format_proxybridge_status(
+    process_count: usize,
+    site_count: usize,
+    selected_apps_only: bool,
+    started: bool,
+) -> String {
     let prefix = if started {
         "✅ ProxyBridge запущен"
     } else {
@@ -742,22 +795,27 @@ pub(super) fn format_proxybridge_status(process_count: usize, site_count: usize,
     if selected_apps_only {
         match (process_count, site_count) {
             (0, sites) if sites > 0 => format!("{}: сайты через VPN [{}]", prefix, sites),
-            (processes, 0) if processes > 0 => format!("{}: выбранные приложения [{}]", prefix, processes),
+            (processes, 0) if processes > 0 => {
+                format!("{}: выбранные приложения [{}]", prefix, processes)
+            }
             (processes, sites) if processes > 0 && sites > 0 => {
-                format!("{}: приложения [{}] и сайты [{}] через VPN", prefix, processes, sites)
+                format!(
+                    "{}: приложения [{}] и сайты [{}] через VPN",
+                    prefix, processes, sites
+                )
             }
             _ => prefix.to_string(),
         }
     } else {
         match (process_count, site_count) {
             (0, 0) => format!("{}: вся система через VPN", prefix),
-            (processes, 0) if processes > 0 => format!("{}: исключения процессов [{}]", prefix, processes),
+            (processes, 0) if processes > 0 => {
+                format!("{}: исключения процессов [{}]", prefix, processes)
+            }
             (0, sites) if sites > 0 => format!("{}: исключения сайтов [{}]", prefix, sites),
             (processes, sites) => format!(
                 "{}: исключения процессов [{}] и сайтов [{}]",
-                prefix,
-                processes,
-                sites
+                prefix, processes, sites
             ),
         }
     }
@@ -768,6 +826,7 @@ pub(super) fn start_proxybridge(
     selected_sites: &[String],
     selected_apps_only: bool,
     wireproxy_info_addr: Option<&str>,
+    tunnel_dns_servers: &[String],
 ) -> Result<Option<std::process::Child>, String> {
     use std::fs::OpenOptions;
     #[cfg(target_os = "windows")]
@@ -777,58 +836,21 @@ pub(super) fn start_proxybridge(
         return Err("Не выбраны процессы для маршрутизации или сайты для VPN".to_string());
     }
 
-    let current_exe = std::env::current_exe()
-        .map_err(|_| "Не удалось определить текущий путь".to_string())?;
+    let current_exe =
+        std::env::current_exe().map_err(|_| "Не удалось определить текущий путь".to_string())?;
     let current_exe_name = current_exe
         .file_name()
         .and_then(|name| name.to_str())
         .map(str::to_string);
 
+    // ProxyBridge inserts each added rule at the head, so later entries have higher priority.
     let mut rules: Vec<String> = Vec::new();
-    if selected_apps_only {
-        let (site_rules, unresolved_sites) = build_site_rules(selected_sites, "PROXY");
-
-        if !processes.is_empty() {
-            rules.extend(processes.iter().map(|process| format!("{}:*:*:BOTH:PROXY", process)));
-        }
-
-        if !unresolved_sites.is_empty() {
-            log::warn!(
-                "Не удалось разрешить IPv4 для сайтов через VPN: {}",
-                unresolved_sites.join(", ")
-            );
-        }
-
-        rules.extend(site_rules);
-
-        if rules.is_empty() {
-            if !unresolved_sites.is_empty() {
-                return Err(format!(
-                    "Не удалось разрешить IPv4 для сайтов через VPN: {}",
-                    unresolved_sites.join(", ")
-                ));
-            }
-            return Err("Не выбраны процессы для маршрутизации или сайты для VPN".to_string());
-        }
-    } else {
-        let (site_rules, unresolved_sites) = build_site_rules(selected_sites, "DIRECT");
-
-        if !processes.is_empty() {
-            rules.extend(processes.iter().map(|process| format!("{}:*:*:BOTH:DIRECT", process)));
-        }
-
-        if !unresolved_sites.is_empty() {
-            log::warn!(
-                "Не удалось разрешить IPv4 для сайтов-исключений из VPN: {}",
-                unresolved_sites.join(", ")
-            );
-        }
-
-        rules.extend(site_rules);
+    let append_internal_direct_rules = |rules: &mut Vec<String>| {
         rules.push("ProxyBridge_CLI.exe:*:*:BOTH:DIRECT".to_string());
         rules.push("wireproxy.exe:*:*:BOTH:DIRECT".to_string());
 
-        if let (Some(process_name), Some(info_addr)) = (current_exe_name.as_deref(), wireproxy_info_addr)
+        if let (Some(process_name), Some(info_addr)) =
+            (current_exe_name.as_deref(), wireproxy_info_addr)
         {
             if let Ok(info_socket) = info_addr.parse::<SocketAddr>() {
                 rules.push(format!(
@@ -839,8 +861,74 @@ pub(super) fn start_proxybridge(
                 ));
             }
         }
+    };
+
+    if selected_apps_only {
+        let (site_rules, unresolved_sites) = build_site_rules(selected_sites, "PROXY");
+        let (site_udp_443_block_rules, _) =
+            build_site_rules_with_options(selected_sites, "443", "UDP", "BLOCK");
+
+        if !processes.is_empty() {
+            rules.extend(
+                processes
+                    .iter()
+                    .map(|process| format!("{}:*:*:BOTH:PROXY", process)),
+            );
+            rules.extend(
+                processes
+                    .iter()
+                    .map(|process| format!("{}:*:443:UDP:BLOCK", process)),
+            );
+        }
+
+        if !unresolved_sites.is_empty() {
+            log::warn!(
+                "Не удалось разрешить IPv4 для сайтов через VPN: {}",
+                unresolved_sites.join(", ")
+            );
+        }
+
+        rules.extend(site_rules);
+        rules.extend(site_udp_443_block_rules);
+
+        if rules.is_empty() {
+            if !unresolved_sites.is_empty() {
+                return Err(format!(
+                    "Не удалось разрешить IPv4 для сайтов через VPN: {}",
+                    unresolved_sites.join(", ")
+                ));
+            }
+            return Err("Не выбраны процессы для маршрутизации или сайты для VPN".to_string());
+        }
+        rules.extend(
+            tunnel_dns_servers
+                .iter()
+                .map(|server| format!("*:{}:53:BOTH:PROXY", server)),
+        );
+        append_internal_direct_rules(&mut rules);
+    } else {
+        let (site_rules, unresolved_sites) = build_site_rules(selected_sites, "DIRECT");
 
         rules.push("*:*:*:BOTH:PROXY".to_string());
+        rules.push("*:*:443:UDP:BLOCK".to_string());
+
+        if !processes.is_empty() {
+            rules.extend(
+                processes
+                    .iter()
+                    .map(|process| format!("{}:*:*:BOTH:DIRECT", process)),
+            );
+        }
+
+        if !unresolved_sites.is_empty() {
+            log::warn!(
+                "Не удалось разрешить IPv4 для сайтов-исключений из VPN: {}",
+                unresolved_sites.join(", ")
+            );
+        }
+
+        rules.extend(site_rules);
+        append_internal_direct_rules(&mut rules);
     }
 
     let deps = embedded_deps_bytes::ExtractedDeps::get()
@@ -848,7 +936,8 @@ pub(super) fn start_proxybridge(
 
     let cli_exe = &deps.proxybridge_cli;
 
-    let exe_dir = current_exe.parent()
+    let exe_dir = current_exe
+        .parent()
         .ok_or("Не удалось получить директорию приложения".to_string())?;
 
     let cache_dir = super::managed_cache_dir();
@@ -862,7 +951,10 @@ pub(super) fn start_proxybridge(
         loop {
             if start.elapsed() > timeout {
                 if let Some(tail) = read_log_tail(&log_path, 4096) {
-                    return Err(format!("ProxyBridge не запустился в отведённое время. Лог:\n{}", tail));
+                    return Err(format!(
+                        "ProxyBridge не запустился в отведённое время. Лог:\n{}",
+                        tail
+                    ));
                 }
 
                 return Err("ProxyBridge не запустился и лог недоступен".to_string());
@@ -935,7 +1027,10 @@ pub(super) fn start_proxybridge(
     let batch_path = cache_dir.join("run_proxybridge_elevated.bat");
     let mut batch = String::new();
     batch.push_str("@echo off\r\n");
-    batch.push_str(&format!("cd /d \"{}\"\r\n", cli_exe.parent().unwrap_or(&cache_dir).display()));
+    batch.push_str(&format!(
+        "cd /d \"{}\"\r\n",
+        cli_exe.parent().unwrap_or(&cache_dir).display()
+    ));
     let mut cmdline = format!(
         "\"{}\" --proxy socks5://127.0.0.1:1080 --dns-via-proxy False --localhost-via-proxy {} --verbose 3",
         cli_exe.display(),
@@ -951,9 +1046,14 @@ pub(super) fn start_proxybridge(
     std::fs::write(&batch_path, batch)
         .map_err(|e| format!("Не удалось создать батч-файл для запуска: {}", e))?;
 
-    let ps_cmd = format!("Start-Process -FilePath '{}' -Verb RunAs -WindowStyle Hidden", batch_path.display());
+    let ps_cmd = format!(
+        "Start-Process -FilePath '{}' -Verb RunAs -WindowStyle Hidden",
+        batch_path.display()
+    );
     let mut ps = std::process::Command::new("powershell");
-    ps.arg("-NoProfile").arg("-Command").arg(ps_cmd)
+    ps.arg("-NoProfile")
+        .arg("-Command")
+        .arg(ps_cmd)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .stdin(std::process::Stdio::null());
@@ -963,7 +1063,8 @@ pub(super) fn start_proxybridge(
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         ps.creation_flags(CREATE_NO_WINDOW);
     }
-    let _ = ps.spawn()
+    let _ = ps
+        .spawn()
         .map_err(|e| format!("Не удалось запустить PowerShell для запроса UAC: {}", e))?;
 
     wait_for_start(30)?;
@@ -976,18 +1077,16 @@ pub(super) fn stop_proxybridge() -> Result<(), String> {
     let cache_dir = super::managed_cache_dir();
 
     let pid_file = cache_dir.join("proxybridge.pid");
-    let matches_proxybridge_process = |process: &sysinfo::Process| {
-        process_name_matches(process, "ProxyBridge_CLI.exe")
-    };
+    let matches_proxybridge_process =
+        |process: &sysinfo::Process| process_name_matches(process, "ProxyBridge_CLI.exe");
 
     if !pid_file.exists() && !any_process_matches(matches_proxybridge_process) {
         return Err("ProxyBridge не запущен (файл маркера не найден)".to_string());
     }
 
     if !super::is_elevated() {
-        let launch_result = super::app_runtime::launch_self_elevated(&[
-            OsString::from("/stop-proxybridge"),
-        ]);
+        let launch_result =
+            super::app_runtime::launch_self_elevated(&[OsString::from("/stop-proxybridge")]);
 
         if let Err(error) = launch_result {
             return Err(error);
