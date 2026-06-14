@@ -1,4 +1,4 @@
-# WireGuard Split-Tunneling Solution 👻
+# WireGuard / Amnezia-Wireguard Split-Tunneling Solution 👻
 ### Powered by WireProxy + ProxyBridge + WinDivert
 
 <p align="center">
