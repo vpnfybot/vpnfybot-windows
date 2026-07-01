@@ -38,7 +38,7 @@ InstallDir "$LOCALAPPDATA\Programs\${PRODUCT_DIR}"
 InstallDirRegKey HKCU "${PRODUCT_UNINST_KEY}" "InstallLocation"
 BrandingText "${PRODUCT_DISPLAY_NAME} installer"
 
-VIProductVersion "4.0.7.0"
+VIProductVersion "${PRODUCT_VERSION}.0"
 VIAddVersionKey "ProductName" "${PRODUCT_DISPLAY_NAME}"
 VIAddVersionKey "ProductVersion" "${PRODUCT_VERSION}"
 VIAddVersionKey "CompanyName" "${PRODUCT_PUBLISHER}"

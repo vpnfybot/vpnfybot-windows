@@ -5,6 +5,11 @@ const PROCESS_EXIT_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 const PROCESS_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const ELEVATED_HELPER_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
 const WIREPROXY_START_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
+const PROXYBRIDGE_START_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
+const PROXYBRIDGE_ELEVATED_START_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
+const PROXYBRIDGE_START_POLL_INTERVAL: Duration = Duration::from_millis(200);
+const PROXYBRIDGE_START_SCAN_WINDOW_BYTES: usize = 1024;
+const PROXYBRIDGE_START_DIAGNOSTIC_BYTES: usize = 16 * 1024;
 
 static PROCESS_LIST_CACHE: OnceLock<Mutex<Option<ProcessListCache>>> = OnceLock::new();
 static PROCESS_LIST_REFRESH_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -275,20 +280,22 @@ fn process_name_matches(process: &sysinfo::Process, expected_name: &str) -> bool
         || actual.contains(&normalized_expected)
 }
 
+fn refresh_processes_for_matching(system: &mut sysinfo::System) {
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, UpdateKind};
+
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::new().with_cmd(UpdateKind::OnlyIfNotSet),
+    );
+}
+
 fn kill_processes_matching<F>(mut predicate: F) -> bool
 where
     F: FnMut(&sysinfo::Process) -> bool,
 {
-    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
-
-    let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        true,
-        ProcessRefreshKind::everything()
-            .with_exe(UpdateKind::OnlyIfNotSet)
-            .with_cmd(UpdateKind::OnlyIfNotSet),
-    );
+    let mut system = sysinfo::System::new();
+    refresh_processes_for_matching(&mut system);
 
     let mut killed_any = false;
     for process in system.processes().values() {
@@ -305,16 +312,8 @@ fn any_process_matches<F>(mut predicate: F) -> bool
 where
     F: FnMut(&sysinfo::Process) -> bool,
 {
-    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
-
-    let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        true,
-        ProcessRefreshKind::everything()
-            .with_exe(UpdateKind::OnlyIfNotSet)
-            .with_cmd(UpdateKind::OnlyIfNotSet),
-    );
+    let mut system = sysinfo::System::new();
+    refresh_processes_for_matching(&mut system);
 
     system
         .processes()
@@ -327,8 +326,10 @@ where
     F: FnMut(&sysinfo::Process) -> bool + Copy,
 {
     let started = Instant::now();
+    let mut system = sysinfo::System::new();
     loop {
-        if !any_process_matches(predicate) {
+        refresh_processes_for_matching(&mut system);
+        if !system.processes().values().any(predicate) {
             return true;
         }
 
@@ -360,17 +361,122 @@ fn fallback_taskkill_image(image_name: &str) {
     let _ = taskkill.output();
 }
 
-fn read_log_tail(path: &Path, max_bytes: usize) -> Option<String> {
+fn read_log_since(path: &Path, offset: &mut u64) -> Option<String> {
     use std::io::{Read, Seek, SeekFrom};
 
     let mut file = std::fs::File::open(path).ok()?;
     let length = file.metadata().ok()?.len();
-    let start = length.saturating_sub(max_bytes as u64);
-    file.seek(SeekFrom::Start(start)).ok()?;
+    if length < *offset {
+        *offset = 0;
+    }
 
-    let mut tail = String::new();
-    file.read_to_string(&mut tail).ok()?;
-    Some(tail)
+    file.seek(SeekFrom::Start(*offset)).ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    *offset = file.stream_position().unwrap_or(length);
+    Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn append_bounded_log(buffer: &mut String, chunk: &str, max_bytes: usize) {
+    buffer.push_str(chunk);
+    if buffer.len() <= max_bytes {
+        return;
+    }
+
+    let mut keep_from = buffer.len() - max_bytes;
+    while !buffer.is_char_boundary(keep_from) {
+        keep_from += 1;
+    }
+    buffer.drain(..keep_from);
+}
+
+fn proxybridge_start_succeeded(output: &str) -> bool {
+    output.contains("ProxyBridge started")
+        || output.contains("ProxyBridge started.")
+        || output.contains("Local relay:")
+}
+
+fn proxybridge_start_failed(output: &str) -> bool {
+    output.contains("Failed to open WinDivert")
+        || output.contains("ERROR: Failed to start ProxyBridge")
+        || output.contains("ERROR: ProxyBridge requires Administrator privileges")
+}
+
+fn proxybridge_start_error(message: &str, output: &str) -> String {
+    let output = output.trim();
+    if output.is_empty() {
+        message.to_string()
+    } else {
+        format!("{}. Лог текущей попытки:\n{}", message, output)
+    }
+}
+
+fn wait_for_proxybridge_start(
+    log_path: &Path,
+    initial_log_offset: u64,
+    timeout: Duration,
+    mut child: Option<&mut std::process::Child>,
+) -> Result<(), String> {
+    let started_at = Instant::now();
+    let mut log_offset = initial_log_offset;
+    let mut scan_window = String::new();
+    let mut diagnostic_log = String::new();
+
+    loop {
+        if let Some(chunk) = read_log_since(log_path, &mut log_offset) {
+            scan_window.push_str(&chunk);
+            append_bounded_log(
+                &mut diagnostic_log,
+                &chunk,
+                PROXYBRIDGE_START_DIAGNOSTIC_BYTES,
+            );
+
+            if proxybridge_start_succeeded(&scan_window) {
+                if let Some(process) = child.as_deref_mut() {
+                    if let Ok(Some(status)) = process.try_wait() {
+                        return Err(proxybridge_start_error(
+                            &format!("ProxyBridge завершился сразу после запуска ({})", status),
+                            &diagnostic_log,
+                        ));
+                    }
+                }
+                return Ok(());
+            }
+
+            if proxybridge_start_failed(&scan_window) {
+                return Err(proxybridge_start_error(
+                    "ProxyBridge запущен с ошибкой",
+                    &diagnostic_log,
+                ));
+            }
+
+            if scan_window.len() > PROXYBRIDGE_START_SCAN_WINDOW_BYTES {
+                let mut keep_from = scan_window.len() - PROXYBRIDGE_START_SCAN_WINDOW_BYTES;
+                while !scan_window.is_char_boundary(keep_from) {
+                    keep_from += 1;
+                }
+                scan_window.drain(..keep_from);
+            }
+        }
+
+        if let Some(process) = child.as_deref_mut() {
+            if let Ok(Some(status)) = process.try_wait() {
+                return Err(proxybridge_start_error(
+                    &format!("ProxyBridge завершился до окончания запуска ({})", status),
+                    &diagnostic_log,
+                ));
+            }
+        }
+
+        if started_at.elapsed() >= timeout {
+            return Err(proxybridge_start_error(
+                "ProxyBridge не запустился в отведённое время",
+                &diagnostic_log,
+            ));
+        }
+
+        thread::sleep(PROXYBRIDGE_START_POLL_INTERVAL);
+    }
 }
 
 fn wait_for_wireproxy_start(info_addr: &str, timeout: Duration) -> Result<(), String> {
@@ -465,15 +571,6 @@ pub(super) fn create_and_start_service(conf: &str) -> ServiceResult {
             }
         }
     };
-
-    if super::is_elevated() {
-        if let Err(error) = super::app_runtime::ensure_firewall_rules() {
-            log::warn!(
-                "Не удалось установить правила брандмауэра перед запуском wireproxy: {}",
-                error
-            );
-        }
-    }
 
     if !super::is_elevated() {
         let launch_result = super::app_runtime::launch_self_elevated(&[
@@ -595,6 +692,15 @@ pub(super) fn stop_and_delete_service(conf: &str) -> ServiceResult {
 
         has_matching_config || config_path.is_none()
     };
+
+    if !any_process_matches(matches_target_process) {
+        return ServiceResult {
+            message: "Wireproxy не запущен".to_string(),
+            active: false,
+            error_log: None,
+            wireproxy_info_addr: None,
+        };
+    }
 
     if !super::is_elevated() {
         let launch_result = super::app_runtime::launch_self_elevated(&[
@@ -721,13 +827,8 @@ fn is_ipv4_filter_pattern(value: &str) -> bool {
             .all(|ch| ch.is_ascii_digit() || matches!(ch, '.' | '*' | '-' | ';' | ',' | ' '))
 }
 
-fn build_site_rules_with_options(
-    selected_sites: &[String],
-    ports: &str,
-    protocol: &str,
-    action: &str,
-) -> (Vec<String>, Vec<String>) {
-    let mut rules = Vec::new();
+fn resolve_site_rule_targets(selected_sites: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut targets = Vec::new();
     let mut unresolved_sites = Vec::new();
 
     for site in selected_sites {
@@ -742,10 +843,7 @@ fn build_site_rules_with_options(
                 .collect::<Vec<_>>()
                 .join(";");
             if !host_filter.is_empty() {
-                rules.push(format!(
-                    "*:{}:{}:{}:{}",
-                    host_filter, ports, protocol, action
-                ));
+                targets.push(host_filter);
             }
             continue;
         }
@@ -764,16 +862,30 @@ fn build_site_rules_with_options(
             continue;
         }
 
-        rules.push(format!(
-            "*:{}:{}:{}:{}",
-            resolved_ips.into_iter().collect::<Vec<_>>().join(";"),
-            ports,
-            protocol,
-            action
-        ));
+        targets.push(resolved_ips.into_iter().collect::<Vec<_>>().join(";"));
     }
 
-    (rules, unresolved_sites)
+    (targets, unresolved_sites)
+}
+
+fn format_site_rules(targets: &[String], ports: &str, protocol: &str, action: &str) -> Vec<String> {
+    targets
+        .iter()
+        .map(|target| format!("*:{}:{}:{}:{}", target, ports, protocol, action))
+        .collect()
+}
+
+fn build_site_rules_with_options(
+    selected_sites: &[String],
+    ports: &str,
+    protocol: &str,
+    action: &str,
+) -> (Vec<String>, Vec<String>) {
+    let (targets, unresolved_sites) = resolve_site_rule_targets(selected_sites);
+    (
+        format_site_rules(&targets, ports, protocol, action),
+        unresolved_sites,
+    )
 }
 
 fn build_site_rules(selected_sites: &[String], action: &str) -> (Vec<String>, Vec<String>) {
@@ -864,9 +976,9 @@ pub(super) fn start_proxybridge(
     };
 
     if selected_apps_only {
-        let (site_rules, unresolved_sites) = build_site_rules(selected_sites, "PROXY");
-        let (site_udp_443_block_rules, _) =
-            build_site_rules_with_options(selected_sites, "443", "UDP", "BLOCK");
+        let (site_targets, unresolved_sites) = resolve_site_rule_targets(selected_sites);
+        let site_rules = format_site_rules(&site_targets, "*", "BOTH", "PROXY");
+        let site_udp_443_block_rules = format_site_rules(&site_targets, "443", "UDP", "BLOCK");
 
         if !processes.is_empty() {
             rules.extend(
@@ -945,41 +1057,6 @@ pub(super) fn start_proxybridge(
     let pid_file = cache_dir.join("proxybridge.pid");
     let localhost_via_proxy = "False";
 
-    let wait_for_start = |timeout_secs: u64| -> Result<(), String> {
-        let start = std::time::Instant::now();
-        let timeout = std::time::Duration::from_secs(timeout_secs);
-        loop {
-            if start.elapsed() > timeout {
-                if let Some(tail) = read_log_tail(&log_path, 4096) {
-                    return Err(format!(
-                        "ProxyBridge не запустился в отведённое время. Лог:\n{}",
-                        tail
-                    ));
-                }
-
-                return Err("ProxyBridge не запустился и лог недоступен".to_string());
-            }
-
-            if let Some(tail) = read_log_tail(&log_path, 4096) {
-                if tail.contains("ProxyBridge started")
-                    || tail.contains("ProxyBridge started.")
-                    || tail.contains("Local relay:")
-                {
-                    return Ok(());
-                }
-
-                if tail.contains("Failed to open WinDivert")
-                    || tail.contains("ERROR: Failed to start ProxyBridge")
-                    || tail.contains("ERROR: ProxyBridge requires Administrator privileges")
-                {
-                    return Err(format!("ProxyBridge запущен с ошибкой:\n{}", tail));
-                }
-            }
-
-            std::thread::sleep(std::time::Duration::from_millis(200));
-        }
-    };
-
     if super::is_elevated() {
         let log_file = OpenOptions::new()
             .create(true)
@@ -989,6 +1066,10 @@ pub(super) fn start_proxybridge(
         let log_file_err = log_file
             .try_clone()
             .map_err(|e| format!("Не удалось клонировать лог файл: {}", e))?;
+        let log_offset = log_file
+            .metadata()
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
 
         let mut cmd = std::process::Command::new(&cli_exe);
         cmd.arg("--proxy")
@@ -1014,11 +1095,20 @@ pub(super) fn start_proxybridge(
             cmd.arg("--rule").arg(r);
         }
 
-        let child = cmd
+        let mut child = cmd
             .spawn()
             .map_err(|e| format!("Не удалось запустить ProxyBridge: {}", e))?;
 
-        wait_for_start(12)?;
+        if let Err(error) = wait_for_proxybridge_start(
+            &log_path,
+            log_offset,
+            PROXYBRIDGE_START_WAIT_TIMEOUT,
+            Some(&mut child),
+        ) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
 
         let _ = std::fs::write(pid_file, "running");
         return Ok(Some(child));
@@ -1046,28 +1136,26 @@ pub(super) fn start_proxybridge(
     std::fs::write(&batch_path, batch)
         .map_err(|e| format!("Не удалось создать батч-файл для запуска: {}", e))?;
 
-    let ps_cmd = format!(
-        "Start-Process -FilePath '{}' -Verb RunAs -WindowStyle Hidden",
-        batch_path.display()
-    );
-    let mut ps = std::process::Command::new("powershell");
-    ps.arg("-NoProfile")
-        .arg("-Command")
-        .arg(ps_cmd)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .stdin(std::process::Stdio::null());
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        ps.creation_flags(CREATE_NO_WINDOW);
-    }
-    let _ = ps
-        .spawn()
-        .map_err(|e| format!("Не удалось запустить PowerShell для запроса UAC: {}", e))?;
+    let log_offset = std::fs::metadata(&log_path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    super::app_runtime::launch_self_elevated(&[
+        OsString::from("/start-proxybridge"),
+        batch_path.as_os_str().to_os_string(),
+    ])
+    .map_err(|e| {
+        format!(
+            "Не удалось запустить ProxyBridge с правами администратора: {}",
+            e
+        )
+    })?;
 
-    wait_for_start(30)?;
+    wait_for_proxybridge_start(
+        &log_path,
+        log_offset,
+        PROXYBRIDGE_ELEVATED_START_WAIT_TIMEOUT,
+        None,
+    )?;
 
     let _ = std::fs::write(pid_file, "running");
     Ok(None)
@@ -1115,15 +1203,50 @@ pub(super) fn stop_proxybridge() -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn kill_existing_processes() {
-    let _ = stop_proxybridge();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
 
-    let _ = kill_processes_matching(|process| process_name_matches(process, "wireproxy.exe"));
+    fn temp_log_path(test_name: &str) -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "vpnfybot-proxybridge-{}-{}-{}.log",
+            test_name,
+            std::process::id(),
+            unique
+        ))
+    }
 
-    if !wait_until_processes_exit(
-        |process| process_name_matches(process, "wireproxy.exe"),
-        PROCESS_EXIT_WAIT_TIMEOUT,
-    ) {
-        fallback_taskkill_image("wireproxy.exe");
+    #[test]
+    fn reads_only_current_proxybridge_start_attempt() {
+        let path = temp_log_path("current-attempt");
+        fs::write(&path, "[LOG] ProxyBridge started\nold traffic\n").unwrap();
+        let mut offset = fs::metadata(&path).unwrap().len();
+
+        let mut log = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writeln!(log, "new attempt without a ready marker").unwrap();
+        log.flush().unwrap();
+
+        let current_attempt = read_log_since(&path, &mut offset).unwrap();
+        assert!(!proxybridge_start_succeeded(&current_attempt));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn finds_start_marker_before_large_traffic_burst() {
+        let mut output = "[LOG] ProxyBridge started\n".to_string();
+        output.push_str(&"[CONN] busy process traffic\n".repeat(500));
+
+        assert!(output.len() > 4096);
+        assert!(!output[output.len() - 4096..].contains("ProxyBridge started"));
+        assert!(proxybridge_start_succeeded(&output));
     }
 }

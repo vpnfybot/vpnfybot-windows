@@ -119,12 +119,19 @@ if (![string]::IsNullOrWhiteSpace($stateDir)) {{
     New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
 }}
 
-$interfaces = @(Get-NetIPConfiguration |
-    Where-Object {{ $_.IPv4DefaultGateway -ne $null -and $_.NetAdapter.Status -eq 'Up' }} |
+$adapters = @(Get-NetAdapter -ErrorAction SilentlyContinue)
+$routeIndexes = @(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue |
+    Sort-Object RouteMetric |
     Select-Object -ExpandProperty InterfaceIndex -Unique)
+$interfaces = @(
+    foreach ($index in $routeIndexes) {{
+        $adapter = $adapters | Where-Object {{ $_.InterfaceIndex -eq $index -and $_.Status -eq 'Up' }} | Select-Object -First 1
+        if ($adapter) {{ $index }}
+    }}
+)
 
 if ($interfaces.Count -eq 0) {{
-    $interfaces = @(Get-NetAdapter |
+    $interfaces = @($adapters |
         Where-Object {{ $_.Status -eq 'Up' -and $_.HardwareInterface }} |
         Select-Object -ExpandProperty InterfaceIndex -Unique)
 }}
@@ -132,22 +139,25 @@ if ($interfaces.Count -eq 0) {{
 if ($interfaces.Count -eq 0) {{
     throw 'No active network interfaces found for DNS override'
 }}
+$ipv6Bindings = @(Get-NetAdapterBinding -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue)
 
 if (!(Test-Path -LiteralPath $statePath)) {{
     $lines = New-Object 'System.Collections.Generic.List[string]'
     $lines.Add('vpnfybot-dns-v4')
+    $dnsConfigurations = @(Get-DnsClientServerAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue)
 
     foreach ($index in $interfaces) {{
         $savedServers = @(
-            Get-DnsClientServerAddress -InterfaceIndex $index -ErrorAction SilentlyContinue |
+            $dnsConfigurations |
+                Where-Object {{ $_.InterfaceIndex -eq $index }} |
                 Select-Object -ExpandProperty ServerAddresses
         ) | Where-Object {{ ![string]::IsNullOrWhiteSpace($_) }}
 
         $lines.Add(('{{0}}|servers|{{1}}' -f $index, ($savedServers -join ',')))
 
-        $adapter = Get-NetAdapter -InterfaceIndex $index -ErrorAction SilentlyContinue
+        $adapter = $adapters | Where-Object {{ $_.InterfaceIndex -eq $index }} | Select-Object -First 1
         if ($adapter) {{
-            $binding = Get-NetAdapterBinding -Name $adapter.Name -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue
+            $binding = $ipv6Bindings | Where-Object {{ $_.Name -eq $adapter.Name }} | Select-Object -First 1
             if ($binding) {{
                 $lines.Add(('binding|{{0}}|{{1}}' -f $index, $binding.Enabled))
             }}
@@ -157,14 +167,15 @@ if (!(Test-Path -LiteralPath $statePath)) {{
     Set-Content -LiteralPath $statePath -Encoding UTF8 -Value $lines
 }}
 
-foreach ($index in $interfaces) {{
-    Set-DnsClientServerAddress -InterfaceIndex $index -ServerAddresses $servers -ErrorAction Stop
-}}
+Set-DnsClientServerAddress -InterfaceIndex $interfaces -ServerAddresses $servers -ErrorAction Stop
 
 foreach ($index in $interfaces) {{
-    $adapter = Get-NetAdapter -InterfaceIndex $index -ErrorAction SilentlyContinue
+    $adapter = $adapters | Where-Object {{ $_.InterfaceIndex -eq $index }} | Select-Object -First 1
     if ($adapter) {{
-        Disable-NetAdapterBinding -Name $adapter.Name -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue
+        $binding = $ipv6Bindings | Where-Object {{ $_.Name -eq $adapter.Name }} | Select-Object -First 1
+        if ($binding -and $binding.Enabled) {{
+            Disable-NetAdapterBinding -Name $adapter.Name -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue
+        }}
     }}
 }}
 
@@ -355,5 +366,50 @@ fn hide_command_window(command: &mut std::process::Command) {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         command.creation_flags(CREATE_NO_WINDOW);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn assert_valid_powershell(script: &str) {
+        let mut child = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "[ScriptBlock]::Create([Console]::In.ReadToEnd()) | Out-Null",
+            ])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(script.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "PowerShell syntax error: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn generated_dns_scripts_have_valid_powershell_syntax() {
+        let state_path = Path::new(r"C:\vpnfybot-test\dns-state.txt");
+        let apply_script =
+            build_apply_dns_script(state_path, &["1.1.1.1".to_string(), "8.8.8.8".to_string()]);
+        let restore_script = build_restore_dns_script(state_path);
+
+        assert!(!apply_script.contains("Get-NetIPConfiguration"));
+        assert_valid_powershell(&apply_script);
+        assert_valid_powershell(&restore_script);
     }
 }

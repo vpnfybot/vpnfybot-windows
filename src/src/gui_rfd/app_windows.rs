@@ -1266,33 +1266,3 @@ impl AppState {
         self.set_imported_conf_path(path);
     }
 }
-
-pub(super) fn show_silent_windows_notification_detached(
-    title: &str,
-    message: &str,
-    launch: &str,
-) -> windows::core::Result<()> {
-    let toast_xml = XmlDocument::new()?;
-    let image_xml = notification_icon_uri()
-        .map(|uri| {
-            format!(
-                "<image placement=\"appLogoOverride\" hint-crop=\"none\" src=\"{}\"/>",
-                xml_escape(&uri),
-            )
-        })
-        .unwrap_or_default();
-    let xml = format!(
-        "<toast duration=\"short\" launch=\"{}\"><visual><binding template=\"ToastGeneric\">{}<text>{}</text><text>{}</text></binding></visual><audio silent=\"true\"/></toast>",
-        xml_escape(launch),
-        image_xml,
-        xml_escape(title),
-        xml_escape(message),
-    );
-    let xml_hstring = HSTRING::from(xml);
-    toast_xml.LoadXml(&xml_hstring)?;
-    let toast = ToastNotification::CreateToastNotification(&toast_xml)?;
-    let notifier =
-        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(NOTIFICATION_APP_ID))?;
-    notifier.Show(&toast)?;
-    Ok(())
-}

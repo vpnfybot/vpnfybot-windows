@@ -1,0 +1,10 @@
+C:\Users\xovayzer\Documents\GitHub_vpnfybot\vpnfybot-windows\src\target\release\deps\windows_result-4532ce48342e3c19.d: C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-result-0.1.2\src\lib.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-result-0.1.2\src\bindings.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-result-0.1.2\src\com.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-result-0.1.2\src\strings.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-result-0.1.2\src\error.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-result-0.1.2\src\hresult.rs
+
+C:\Users\xovayzer\Documents\GitHub_vpnfybot\vpnfybot-windows\src\target\release\deps\libwindows_result-4532ce48342e3c19.rmeta: C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-result-0.1.2\src\lib.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-result-0.1.2\src\bindings.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-result-0.1.2\src\com.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-result-0.1.2\src\strings.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-result-0.1.2\src\error.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-result-0.1.2\src\hresult.rs
+
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-result-0.1.2\src\lib.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-result-0.1.2\src\bindings.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-result-0.1.2\src\com.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-result-0.1.2\src\strings.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-result-0.1.2\src\error.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-result-0.1.2\src\hresult.rs:

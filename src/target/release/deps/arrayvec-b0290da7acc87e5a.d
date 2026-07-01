@@ -1,0 +1,11 @@
+C:\Users\xovayzer\Documents\GitHub_vpnfybot\vpnfybot-windows\src\target\release\deps\arrayvec-b0290da7acc87e5a.d: C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\lib.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\arrayvec_impl.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\arrayvec.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\array_string.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\char.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\errors.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\utils.rs
+
+C:\Users\xovayzer\Documents\GitHub_vpnfybot\vpnfybot-windows\src\target\release\deps\libarrayvec-b0290da7acc87e5a.rmeta: C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\lib.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\arrayvec_impl.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\arrayvec.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\array_string.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\char.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\errors.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\utils.rs
+
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\lib.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\arrayvec_impl.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\arrayvec.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\array_string.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\char.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\errors.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\arrayvec-0.7.6\src\utils.rs:

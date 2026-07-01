@@ -1,0 +1,10 @@
+C:\Users\xovayzer\Documents\GitHub_vpnfybot\vpnfybot-windows\src\target\release\deps\ecolor-f661184a7c88c2b4.d: C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ecolor-0.27.2\src\lib.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ecolor-0.27.2\src\color32.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ecolor-0.27.2\src\hsva_gamma.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ecolor-0.27.2\src\hsva.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ecolor-0.27.2\src\rgba.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ecolor-0.27.2\src\hex_color_runtime.rs
+
+C:\Users\xovayzer\Documents\GitHub_vpnfybot\vpnfybot-windows\src\target\release\deps\libecolor-f661184a7c88c2b4.rmeta: C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ecolor-0.27.2\src\lib.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ecolor-0.27.2\src\color32.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ecolor-0.27.2\src\hsva_gamma.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ecolor-0.27.2\src\hsva.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ecolor-0.27.2\src\rgba.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ecolor-0.27.2\src\hex_color_runtime.rs
+
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ecolor-0.27.2\src\lib.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ecolor-0.27.2\src\color32.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ecolor-0.27.2\src\hsva_gamma.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ecolor-0.27.2\src\hsva.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ecolor-0.27.2\src\rgba.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ecolor-0.27.2\src\hex_color_runtime.rs:

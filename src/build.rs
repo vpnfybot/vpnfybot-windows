@@ -17,6 +17,10 @@ fn main() {
 
     println!("cargo:rerun-if-changed={}", png_path.display());
     println!("cargo:rerun-if-changed={}", manifest_dir.join("app.rc").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        manifest_dir.join("installer/vpnfybot-windows.nsi").display()
+    );
 
     if let Err(e) = prepare_embedded_deps(&manifest_dir, &out_dir) {
         panic!("Failed to prepare embedded dependencies: {}", e);

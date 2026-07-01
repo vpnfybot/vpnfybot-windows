@@ -1,0 +1,10 @@
+C:\Users\xovayzer\Documents\GitHub_vpnfybot\vpnfybot-windows\src\target\release\deps\crc32fast-01dd677630635d00.d: C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\crc32fast-1.5.0\src\lib.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\crc32fast-1.5.0\src\baseline.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\crc32fast-1.5.0\src\combine.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\crc32fast-1.5.0\src\specialized\mod.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\crc32fast-1.5.0\src\table.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\crc32fast-1.5.0\src\specialized\pclmulqdq.rs
+
+C:\Users\xovayzer\Documents\GitHub_vpnfybot\vpnfybot-windows\src\target\release\deps\libcrc32fast-01dd677630635d00.rmeta: C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\crc32fast-1.5.0\src\lib.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\crc32fast-1.5.0\src\baseline.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\crc32fast-1.5.0\src\combine.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\crc32fast-1.5.0\src\specialized\mod.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\crc32fast-1.5.0\src\table.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\crc32fast-1.5.0\src\specialized\pclmulqdq.rs
+
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\crc32fast-1.5.0\src\lib.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\crc32fast-1.5.0\src\baseline.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\crc32fast-1.5.0\src\combine.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\crc32fast-1.5.0\src\specialized\mod.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\crc32fast-1.5.0\src\table.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\crc32fast-1.5.0\src\specialized\pclmulqdq.rs:

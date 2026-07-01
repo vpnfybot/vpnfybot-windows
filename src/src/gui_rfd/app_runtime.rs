@@ -4,21 +4,8 @@ use super::app_windows::{
     publish_taskbar_traffic_widget_snapshot, set_taskbar_traffic_widget_worker_enabled,
 };
 
-const SUBSCRIPTION_NOTIFY_72_HOURS: u8 = 1 << 0;
-const SUBSCRIPTION_NOTIFY_48_HOURS: u8 = 1 << 1;
-const SUBSCRIPTION_NOTIFY_24_HOURS: u8 = 1 << 2;
-const SUBSCRIPTION_NOTIFY_EXPIRED: u8 = 1 << 3;
-const SUBSCRIPTION_CHECK_INTERVAL: Duration = Duration::from_secs(60);
 const SUBSCRIPTION_SCHEDULED_TASK_NAME: &str = "vpnfybot-windows-subscription-check";
 const SUBSCRIPTION_SCHEDULED_TASK_ARG: &str = "/subscription-check";
-
-#[derive(Clone, Copy)]
-enum SubscriptionNotificationKind {
-    Warning72Hours,
-    Warning48Hours,
-    Warning24Hours,
-    Expired,
-}
 
 impl Default for AppState {
     fn default() -> Self {
@@ -55,8 +42,6 @@ impl Default for AppState {
             cached_time_display: String::new(),
             subscription_for_date_display: None,
             subscription_expires_at_unix: None,
-            subscription_notification_mask: 0,
-            last_subscription_notification_check: None,
             cached_up_display: "0.00".to_string(),
             cached_down_display: "0.00".to_string(),
             last_upload_bps: 0.0,
@@ -90,6 +75,7 @@ impl Default for AppState {
             connect_animation_start: None,
             disconnect_animation_start: None,
             last_notification: None,
+            connection_notification_pending: false,
             update_pending: None,
             proxybridge_running: false,
             selected_processes,
@@ -109,7 +95,7 @@ impl Default for AppState {
             button_hfont_light: create_button_ui_font_light(),
         };
         update_check::spawn_update_check_thread();
-        sync_subscription_check_task(s.conf_path.as_deref());
+        cleanup_legacy_subscription_notifications();
         s.spawn_subscription_info_refresh();
         s
     }
@@ -121,8 +107,6 @@ impl AppState {
         self.conf_path = Some(path);
         self.error_log = None;
         save_conf_path(self.conf_path.as_ref().unwrap());
-        clear_subscription_notification_state();
-        sync_subscription_check_task(self.conf_path.as_deref());
         self.status.clear();
         self.reset_subscription_info_display();
         self.spawn_subscription_info_refresh();
@@ -132,8 +116,6 @@ impl AppState {
         self.subscription_info_rx = None;
         self.subscription_for_date_display = None;
         self.subscription_expires_at_unix = None;
-        self.subscription_notification_mask = 0;
-        self.last_subscription_notification_check = None;
         self.last_time_display_update = None;
         self.cached_time_display.clear();
     }
@@ -165,23 +147,11 @@ impl AppState {
                 if let Some(info) = info {
                     self.subscription_for_date_display = Some(info.display_date);
                     self.subscription_expires_at_unix = Some(info.expires_at_unix);
-                    self.subscription_notification_mask = load_subscription_notification_state()
-                        .and_then(|(expires_at_unix, notification_mask)| {
-                            (expires_at_unix == info.expires_at_unix).then_some(notification_mask)
-                        })
-                        .unwrap_or(0);
-                    save_subscription_notification_state(
-                        info.expires_at_unix,
-                        self.subscription_notification_mask,
-                    );
                 } else {
                     self.subscription_for_date_display = None;
                     self.subscription_expires_at_unix = None;
-                    self.subscription_notification_mask = 0;
-                    clear_subscription_notification_state();
                 }
                 self.subscription_info_rx = None;
-                self.last_subscription_notification_check = None;
                 self.last_time_display_update = None;
                 self.cached_time_display.clear();
                 true
@@ -420,50 +390,10 @@ impl AppState {
         }
     }
 
-    pub(super) fn maybe_notify_subscription_expiry(&mut self) {
-        let Some(expires_at_unix) = self.subscription_expires_at_unix else {
-            return;
-        };
-
-        if !self
-            .last_subscription_notification_check
-            .map_or(true, |instant| {
-                instant.elapsed() >= SUBSCRIPTION_CHECK_INTERVAL
-            })
-        {
-            return;
-        }
-
-        self.last_subscription_notification_check = Some(Instant::now());
-
-        let Some(now_unix) = current_unix_timestamp() else {
-            return;
-        };
-
-        if let Some((kind, notification_mask)) = due_subscription_notification(
-            expires_at_unix,
-            self.subscription_notification_mask,
-            now_unix,
-        ) {
-            self.show_subscription_notification(kind);
-            self.subscription_notification_mask |= notification_mask;
-            save_subscription_notification_state(
-                expires_at_unix,
-                self.subscription_notification_mask,
-            );
-        }
-    }
-
-    fn show_subscription_notification(&mut self, kind: SubscriptionNotificationKind) {
-        self.show_silent_windows_notification(
-            &self.subscription_notification_title(),
-            subscription_notification_message(self.language, kind),
-            subscription_notification_launch(kind),
-        );
-    }
-
-    pub(super) fn subscription_notification_title(&self) -> String {
-        subscription_notification_title_from_conf_path(self.conf_path.as_deref())
+    pub(super) fn subscription_is_expired(&self) -> bool {
+        self.subscription_expires_at_unix
+            .zip(current_unix_timestamp())
+            .is_some_and(|(expires_at_unix, now_unix)| expires_at_unix <= now_unix)
     }
 
     pub(super) fn gif_pulse_scale(&mut self) -> f32 {
@@ -531,6 +461,7 @@ impl AppState {
         self.status_rx = None;
         self.service_running = false;
         self.service_active = false;
+        self.connection_notification_pending = false;
         self.proxybridge_running = false;
         self.reset_tunnel_traffic_state();
         self.connected_at = None;
@@ -549,8 +480,7 @@ impl AppState {
         self.process_search_text.clear();
         self.language = Language::En;
         self.win_text_cache.clear();
-        clear_subscription_notification_state();
-        sync_subscription_check_task(None);
+        cleanup_legacy_subscription_notifications();
         delete_app_storage_dirs();
         save_language(self.language);
     }
@@ -952,143 +882,7 @@ fn quote_windows_argument(argument: &OsStr) -> String {
     escaped
 }
 
-fn subscription_notification_title_from_conf_path(conf_path: Option<&str>) -> String {
-    conf_path
-        .and_then(|path| Path::new(path).file_name())
-        .and_then(|name| name.to_str())
-        .unwrap_or("config.conf")
-        .to_string()
-}
-
-fn subscription_notification_message(
-    language: Language,
-    kind: SubscriptionNotificationKind,
-) -> &'static str {
-    match kind {
-        SubscriptionNotificationKind::Warning72Hours => {
-            language.translate("Подписка истекает через 72 часа❗️")
-        }
-        SubscriptionNotificationKind::Warning48Hours => {
-            language.translate("Подписка истекает через 48 часов❗️")
-        }
-        SubscriptionNotificationKind::Warning24Hours => {
-            language.translate("Подписка истекает через 24 часа❗️")
-        }
-        SubscriptionNotificationKind::Expired => language.translate("Подписка истекла❗️"),
-    }
-}
-
-fn subscription_notification_launch(kind: SubscriptionNotificationKind) -> &'static str {
-    match kind {
-        SubscriptionNotificationKind::Warning72Hours => "vpnfybot-windows/subscription-warning-72",
-        SubscriptionNotificationKind::Warning48Hours => "vpnfybot-windows/subscription-warning-48",
-        SubscriptionNotificationKind::Warning24Hours => "vpnfybot-windows/subscription-warning-24",
-        SubscriptionNotificationKind::Expired => "vpnfybot-windows/subscription-expired",
-    }
-}
-
-fn notification_mask_for_kind(kind: SubscriptionNotificationKind) -> u8 {
-    match kind {
-        SubscriptionNotificationKind::Warning72Hours => SUBSCRIPTION_NOTIFY_72_HOURS,
-        SubscriptionNotificationKind::Warning48Hours => SUBSCRIPTION_NOTIFY_48_HOURS,
-        SubscriptionNotificationKind::Warning24Hours => SUBSCRIPTION_NOTIFY_24_HOURS,
-        SubscriptionNotificationKind::Expired => SUBSCRIPTION_NOTIFY_EXPIRED,
-    }
-}
-
-fn due_subscription_notification(
-    expires_at_unix: i64,
-    notification_mask: u8,
-    now_unix: i64,
-) -> Option<(SubscriptionNotificationKind, u8)> {
-    let seconds_remaining = expires_at_unix - now_unix;
-    let kind = if seconds_remaining <= 0 {
-        SubscriptionNotificationKind::Expired
-    } else if seconds_remaining <= 24 * 3600 {
-        SubscriptionNotificationKind::Warning24Hours
-    } else if seconds_remaining <= 48 * 3600 {
-        SubscriptionNotificationKind::Warning48Hours
-    } else if seconds_remaining <= 72 * 3600 {
-        SubscriptionNotificationKind::Warning72Hours
-    } else {
-        return None;
-    };
-
-    let mask = notification_mask_for_kind(kind);
-    (notification_mask & mask == 0).then_some((kind, mask))
-}
-
-fn sync_subscription_check_task(conf_path: Option<&str>) {
-    let result = if conf_path.is_some() {
-        ensure_subscription_check_task_registered()
-    } else {
-        clear_subscription_notification_state();
-        remove_subscription_check_task()
-    };
-
-    if let Err(error) = result {
-        eprintln!(
-            "⚠ Не удалось синхронизировать задачу проверки подписки в планировщике: {}",
-            error
-        );
-    }
-}
-
-fn ensure_subscription_check_task_registered() -> Result<(), String> {
-    let exe_path = env::current_exe().map_err(|error| {
-        format!(
-            "Не удалось определить путь к приложению для планировщика: {}",
-            error
-        )
-    })?;
-    let task_command = format!(
-        "{} {}",
-        quote_windows_argument(exe_path.as_os_str()),
-        SUBSCRIPTION_SCHEDULED_TASK_ARG,
-    );
-
-    let mut command = std::process::Command::new("schtasks");
-    command.args([
-        "/Create",
-        "/SC",
-        "MINUTE",
-        "/MO",
-        "1",
-        "/TN",
-        SUBSCRIPTION_SCHEDULED_TASK_NAME,
-        "/TR",
-        &task_command,
-        "/RL",
-        "LIMITED",
-        "/IT",
-        "/F",
-    ]);
-
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-
-    let output = command.output().map_err(|error| {
-        format!(
-            "Не удалось запустить schtasks для создания задачи: {}",
-            error
-        )
-    })?;
-
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "schtasks /Create завершился с кодом {}",
-            output.status.code().unwrap_or(-1)
-        ))
-    }
-}
-
-fn remove_subscription_check_task() -> Result<(), String> {
+fn remove_legacy_subscription_check_task() -> Result<(), String> {
     let mut command = std::process::Command::new("schtasks");
     command.args(["/Delete", "/TN", SUBSCRIPTION_SCHEDULED_TASK_NAME, "/F"]);
 
@@ -1113,6 +907,16 @@ fn remove_subscription_check_task() -> Result<(), String> {
             "schtasks /Delete завершился с кодом {}",
             output.status.code().unwrap_or(-1)
         ))
+    }
+}
+
+fn cleanup_legacy_subscription_notifications() {
+    clear_legacy_subscription_notification_state();
+    if let Err(error) = remove_legacy_subscription_check_task() {
+        eprintln!(
+            "⚠ Не удалось удалить устаревшую задачу проверки подписки: {}",
+            error
+        );
     }
 }
 
@@ -1151,52 +955,8 @@ fn initialize_app_environment(reset_runtime_state: bool) {
     configure_process_notification_identity();
 }
 
-fn run_subscription_check_mode() -> ! {
-    initialize_app_environment(false);
-
-    let language = load_language();
-    let Some(conf_path) = load_saved_conf_path() else {
-        clear_subscription_notification_state();
-        let _ = remove_subscription_check_task();
-        std::process::exit(0);
-    };
-
-    let Some(subscription_info) = fetch_subscription_info(&conf_path) else {
-        std::process::exit(0);
-    };
-
-    let mut notification_mask = load_subscription_notification_state()
-        .and_then(|(expires_at_unix, notification_mask)| {
-            (expires_at_unix == subscription_info.expires_at_unix).then_some(notification_mask)
-        })
-        .unwrap_or(0);
-
-    let Some(now_unix) = current_unix_timestamp() else {
-        std::process::exit(0);
-    };
-
-    if let Some((kind, notification_bit)) = due_subscription_notification(
-        subscription_info.expires_at_unix,
-        notification_mask,
-        now_unix,
-    ) {
-        let title = subscription_notification_title_from_conf_path(Some(&conf_path));
-        let message = subscription_notification_message(language, kind);
-        if let Err(error) = super::app_windows::show_silent_windows_notification_detached(
-            &title,
-            message,
-            subscription_notification_launch(kind),
-        ) {
-            eprintln!(
-                "⚠ Не удалось показать уведомление проверки подписки: {}",
-                error
-            );
-            std::process::exit(1);
-        }
-        notification_mask |= notification_bit;
-    }
-
-    save_subscription_notification_state(subscription_info.expires_at_unix, notification_mask);
+fn run_legacy_subscription_check_cleanup_mode() -> ! {
+    cleanup_legacy_subscription_notifications();
     std::process::exit(0);
 }
 
@@ -1396,8 +1156,11 @@ pub(crate) fn app_main() -> eframe::Result<()> {
     if args.len() >= 2 && args[1] == OsStr::new("/stop-proxybridge") {
         run_stop_proxybridge_mode();
     }
+    if args.len() >= 3 && args[1] == OsStr::new("/start-proxybridge") {
+        run_start_proxybridge_mode(&args[2]);
+    }
     if args.len() >= 2 && args[1] == OsStr::new(SUBSCRIPTION_SCHEDULED_TASK_ARG) {
-        run_subscription_check_mode();
+        run_legacy_subscription_check_cleanup_mode();
     }
     if args.len() >= 3 && args[1] == OsStr::new("/service") {
         let info_addr = args.get(3).map(|value| value.as_os_str());
@@ -1455,7 +1218,7 @@ pub(crate) fn app_main() -> eframe::Result<()> {
 }
 
 fn run_wireproxy_mode(conf: &OsStr, info_addr: Option<&OsStr>) -> ! {
-    initialize_app_environment(false);
+    let _ = app_dirs::AppDirs::init();
 
     let conf_path = conf.to_string_lossy();
 
@@ -1467,15 +1230,11 @@ fn run_wireproxy_mode(conf: &OsStr, info_addr: Option<&OsStr>) -> ! {
         }
     };
 
-    if let Err(error) = ensure_firewall_rules() {
+    if let Err(error) = apply_tunnel_dns(conf_path.as_ref()) {
         eprintln!(
-            "⚠ Не удалось подготовить правила брандмауэра для wireproxy: {}",
+            "Failed to apply tunnel DNS before wireproxy start: {}",
             error
         );
-    }
-
-    if let Err(error) = apply_tunnel_dns(conf_path.as_ref()) {
-        eprintln!("Failed to apply tunnel DNS before wireproxy start: {}", error);
     }
 
     let mut command = std::process::Command::new(&deps.wireproxy);
@@ -1500,6 +1259,9 @@ fn run_wireproxy_mode(conf: &OsStr, info_addr: Option<&OsStr>) -> ! {
 
     match command.spawn() {
         Ok(mut child) => {
+            // The installer already creates these rules. Refresh them in the background for
+            // portable/self-updated builds without delaying tunnel readiness.
+            setup_firewall_rules();
             let exit_status = child
                 .wait()
                 .unwrap_or_else(|_| std::process::ExitStatus::default());
@@ -1532,6 +1294,31 @@ fn run_stop_proxybridge_mode() -> ! {
         Ok(_) => std::process::exit(0),
         Err(error) => {
             eprintln!("{}", error);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run_start_proxybridge_mode(batch_path: &OsStr) -> ! {
+    let mut command = std::process::Command::new("cmd");
+    command
+        .arg("/C")
+        .arg(batch_path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    match command.spawn() {
+        Ok(_) => std::process::exit(0),
+        Err(error) => {
+            eprintln!("Не удалось запустить ProxyBridge: {}", error);
             std::process::exit(1);
         }
     }

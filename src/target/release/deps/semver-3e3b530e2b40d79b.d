@@ -1,0 +1,11 @@
+C:\Users\xovayzer\Documents\GitHub_vpnfybot\vpnfybot-windows\src\target\release\deps\semver-3e3b530e2b40d79b.d: C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\lib.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\display.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\error.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\eval.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\identifier.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\impls.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\parse.rs
+
+C:\Users\xovayzer\Documents\GitHub_vpnfybot\vpnfybot-windows\src\target\release\deps\libsemver-3e3b530e2b40d79b.rmeta: C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\lib.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\display.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\error.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\eval.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\identifier.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\impls.rs C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\parse.rs
+
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\lib.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\display.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\error.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\eval.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\identifier.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\impls.rs:
+C:\Users\xovayzer\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\semver-1.0.28\src\parse.rs:

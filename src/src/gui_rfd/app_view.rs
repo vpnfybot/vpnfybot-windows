@@ -13,10 +13,8 @@ impl App for AppState {
             ctx.request_repaint_after(Duration::from_millis(250));
         }
         if self.subscription_expires_at_unix.is_some() {
-            self.maybe_notify_subscription_expiry();
             ctx.request_repaint_after(Duration::from_secs(60));
         }
-
         #[cfg(target_os = "windows")]
         {
             if !self.window_frame_styled && self.window_frame_attempts < 10 {
@@ -56,7 +54,7 @@ impl App for AppState {
                     let content_w = (available.width() * 0.7).clamp(320.0, max_content_w);
                     let content_h = 260.0_f32;
                     let content_rect = egui::Rect::from_center_size(
-                        available.center() + egui::vec2(0.0, 20.0),
+                        available.center() + egui::vec2(0.0, 28.0),
                         egui::vec2(content_w, content_h),
                     );
                     let mut content_ui =
@@ -1295,6 +1293,7 @@ impl App for AppState {
                     if connect_interactive && connect_response.clicked() {
                         if let Some(ref conf) = self.conf_path {
                             if self.service_active {
+                                self.connection_notification_pending = false;
                                 let conf_path = conf.clone();
                                 let (tx, rx) = mpsc::channel();
                                 self.status_rx = Some(rx);
@@ -1308,6 +1307,7 @@ impl App for AppState {
                                     let _ = tx.send(result);
                                 });
                             } else {
+                                self.connection_notification_pending = false;
                                 self.import_button_opacity = 0.0;
                                 self.connect_animation_start = Some(Instant::now());
                                 let conf = conf.clone();
@@ -1327,7 +1327,7 @@ impl App for AppState {
 
                                 let status_sender = tx;
                                 thread::spawn(move || {
-                                    kill_existing_processes();
+                                    let _ = stop_proxybridge();
                                     let _ = stop_and_delete_service(&conf);
                                     let result = create_and_start_service(&conf);
                                     let _ = status_sender.send(result);
@@ -1372,14 +1372,24 @@ impl App for AppState {
                         self.last_time_display_update = Some(Instant::now());
                     }
                     let display_text = &self.cached_time_display;
+                    let subscription_expired = self.connected_at.is_none()
+                        && self.subscription_for_date_display.is_some()
+                        && self.subscription_is_expired();
+                    let text_color = if subscription_expired {
+                        egui::Color32::RED
+                    } else {
+                        egui::Color32::from_white_alpha(text_alpha)
+                    };
 
                     #[cfg(target_os = "windows")]
                     {
                         let ppp = ctx.pixels_per_point();
                         let w_px = (text_rect.width() * ppp).ceil() as usize;
                         let h_px = (text_rect.height() * ppp).ceil() as usize;
-                        let key = format!("center_mode_display:{}:{}:{}", display_text, w_px, h_px);
-                        let text_color = egui::Color32::from_white_alpha(text_alpha);
+                        let key = format!(
+                            "center_mode_display:{}:{}:{}:{}",
+                            display_text, w_px, h_px, subscription_expired
+                        );
                         if let Some(tex) = self.win_text_cache.get(&key) {
                             ui.painter().image(
                                 tex.id(),
@@ -1415,7 +1425,7 @@ impl App for AppState {
                                 egui::Align2::CENTER_CENTER,
                                 &display_text,
                                 egui::FontId::default(),
-                                egui::Color32::from_white_alpha(text_alpha),
+                                text_color,
                             );
                         }
                     }
@@ -1426,7 +1436,7 @@ impl App for AppState {
                             egui::Align2::CENTER_CENTER,
                             display_text,
                             egui::FontId::default(),
-                            egui::Color32::from_white_alpha(text_alpha),
+                            text_color,
                         );
                     }
 
@@ -1682,6 +1692,7 @@ impl App for AppState {
                                 self.import_button_opacity = 0.0;
                                 self.start_tunnel_traffic_worker();
                                 if !was_active {
+                                    self.connection_notification_pending = false;
                                     self.connected_at = Some(Instant::now());
                                     self.session_traffic_bytes = 0;
                                     self.session_base_traffic_bytes = None;
@@ -1698,24 +1709,6 @@ impl App for AppState {
                                     self.cached_down_display.push_str("0.00");
                                     self.animated_frame_index = 0;
                                     self.animated_last_frame = Instant::now();
-                                    let notification_conf_name = self
-                                        .conf_path
-                                        .as_deref()
-                                        .map(|conf| {
-                                            Path::new(conf)
-                                                .file_name()
-                                                .and_then(|name| name.to_str())
-                                                .unwrap_or(conf)
-                                                .to_string()
-                                        })
-                                        .unwrap_or_else(|| {
-                                            self.language.translate("Туннель подключен").to_owned()
-                                        });
-                                    self.show_silent_windows_notification(
-                                        self.language.translate("Подключен"),
-                                        &notification_conf_name,
-                                        "vpnfybot-windows/connected",
-                                    );
                                     let selected_processes = load_selected_processes();
                                     let proxy_mode = load_proxy_mode();
                                     let selected_sites = self.selected_sites.clone();
@@ -1763,6 +1756,7 @@ impl App for AppState {
                                             Ok(child_opt) => {
                                                 self.proxybridge_running = true;
                                                 self.proxybridge_child = child_opt;
+                                                self.connection_notification_pending = true;
                                                 self.status = format_proxybridge_status(
                                                     selected_processes.len(),
                                                     selected_sites.len(),
@@ -1788,10 +1782,12 @@ impl App for AppState {
                                             self.language
                                                 .translate("Выберите процессы для маршрутизации")
                                         );
+                                        self.connection_notification_pending = true;
                                     }
                                 }
                                 self.status.clear();
                             } else {
+                                self.connection_notification_pending = false;
                                 self.connected_at = None;
                                 self.reset_tunnel_traffic_state();
                                 self.import_button_opacity = 1.0;
@@ -1870,6 +1866,28 @@ impl App for AppState {
                         if self.apply_pending_tunnel_traffic_samples() {
                             self.last_time_display_update = None;
                             is_animating = true;
+
+                            if self.connection_notification_pending {
+                                let notification_conf_name = self
+                                    .conf_path
+                                    .as_deref()
+                                    .map(|conf| {
+                                        Path::new(conf)
+                                            .file_name()
+                                            .and_then(|name| name.to_str())
+                                            .unwrap_or(conf)
+                                            .to_string()
+                                    })
+                                    .unwrap_or_else(|| {
+                                        self.language.translate("Туннель подключен").to_owned()
+                                    });
+                                self.show_silent_windows_notification(
+                                    self.language.translate("Подключен"),
+                                    &notification_conf_name,
+                                    "vpnfybot-windows/connected",
+                                );
+                                self.connection_notification_pending = false;
+                            }
                         }
                     }
 
@@ -2065,10 +2083,12 @@ impl App for AppState {
                                             self.selected_processes.len()
                                         );
                                         let mode_text = if self.proxy_mode_toggle {
-                                            self.language.translate("Выбранные приложения")
+                                            self.language
+                                                .translate("Выбранные сайты / приложения")
                                         } else {
                                             self.language.translate("Вся система")
                                         };
+                                        let support_text = "vpnfybot@gmail.com";
                                         let mode_description_text = if self.proxy_mode_toggle {
                                             self.language.translate("В режиме \"Выбранные приложения\" сайты из списка \"Сайты через VPN\" и приложения из списка \"Приложения через VPN\" будут идти через VPN туннель")
                                         } else {
@@ -2088,18 +2108,30 @@ impl App for AppState {
                                         let button_height = 28.0;
                                         let button_spacing = 8.0;
                                         let bottom_padding = 8.0 / ctx.pixels_per_point();
+                                        let support_text_height = 20.0;
+                                        let support_text_spacing = 6.0;
 
                                         let shift_points = 8.0 / ctx.pixels_per_point();
-                                        let mut mode_rect = egui::Rect::from_min_size(
+                                        let mut support_rect = egui::Rect::from_min_size(
                                             egui::pos2(
                                                 settings_rect.left(),
                                                 settings_rect.bottom()
                                                     - bottom_padding
+                                                    - support_text_height,
+                                            ),
+                                            egui::vec2(button_width, support_text_height),
+                                        );
+                                        support_rect =
+                                            support_rect.translate(egui::vec2(0.0, shift_points));
+                                        let mode_rect = egui::Rect::from_min_size(
+                                            egui::pos2(
+                                                settings_rect.left(),
+                                                support_rect.top()
+                                                    - support_text_spacing
                                                     - button_height,
                                             ),
                                             egui::vec2(button_width, button_height),
                                         );
-                                        mode_rect = mode_rect.translate(egui::vec2(0.0, shift_points));
                                         let process_rect = mode_rect
                                             .translate(egui::vec2(0.0, -(button_height + button_spacing)));
                                         let sites_rect = process_rect
@@ -2265,6 +2297,26 @@ impl App for AppState {
                                             self.proxy_mode_toggle = !self.proxy_mode_toggle;
                                         }
 
+                                        let support_color =
+                                            egui::Color32::from_white_alpha(128);
+                                        ui.allocate_ui_at_rect(support_rect, |ui| {
+                                            ui.with_layout(
+                                                egui::Layout::centered_and_justified(
+                                                    egui::Direction::LeftToRight,
+                                                ),
+                                                |ui| {
+                                                    ui.add(
+                                                        egui::Label::new(
+                                                            egui::RichText::new(support_text)
+                                                                .font(button_font.clone())
+                                                                .color(support_color),
+                                                        )
+                                                        .selectable(true)
+                                                        .wrap(false),
+                                                    );
+                                                },
+                                            );
+                                        });
                                         let widget_response = ui.interact(
                                             widget_rect,
                                             ui.id().with("settings_taskbar_widget_button"),

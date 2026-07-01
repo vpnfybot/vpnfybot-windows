@@ -1,0 +1,2 @@
+[build]
+rustc-workspace-wrapper = ".cargo/cargo-installer-wrapper.cmd"

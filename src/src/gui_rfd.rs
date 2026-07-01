@@ -155,7 +155,7 @@ const BUTTON_FONT_FAMILY_NAME: &str = "vpnfy_button_font";
 const TUNNEL_TRAFFIC_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const TASKBAR_TRAFFIC_HISTORY_WINDOW: Duration = Duration::from_secs(60);
 const TASKBAR_TRAFFIC_HISTORY_CAPACITY: usize = 60;
-const AMNEZIA_WIREGUARD_DISPLAY_LABEL: &str = "amnezia-wireguard";
+const AMNEZIA_WIREGUARD_DISPLAY_LABEL: &str = "AmneziaWG";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Language {
@@ -189,6 +189,7 @@ impl Language {
                 "Отключите туннель перед импортом конфигурации" => "Disconnect the tunnel before importing configuration",
                 "Вся система" => "Whole system",
                 "Выбранные приложения" => "Selected applications",
+                "Выбранные сайты / приложения" => "Selected sites / applications",
                 "Подключен" => "Connected",
                 "Отключен" => "Disconnected",
                 "Туннель подключен" => "Tunnel connected",
@@ -222,10 +223,6 @@ impl Language {
                 "Установить" => "Install",
                 "Позже" => "Later",
                 "Активна до: {}" => "Active until: {}",
-                "Подписка истекает через 72 часа❗️" => "Subscription expires in 72 hours❗️",
-                "Подписка истекает через 48 часов❗️" => "Subscription expires in 48 hours❗️",
-                "Подписка истекает через 24 часа❗️" => "Subscription expires in 24 hours❗️",
-                "Подписка истекла❗️" => "Subscription expired❗️",
                 "Виджет: включено" => "Widget: enabled",
                 "Виджет: выключено" => "Widget: disabled",
                 _ => key,
@@ -258,8 +255,6 @@ struct AppState {
     cached_time_display: String,
     subscription_for_date_display: Option<String>,
     subscription_expires_at_unix: Option<i64>,
-    subscription_notification_mask: u8,
-    last_subscription_notification_check: Option<Instant>,
     // Cached strings for upload/download numeric displays (updated together with `cached_time_display`)
     cached_up_display: String,
     cached_down_display: String,
@@ -297,6 +292,7 @@ struct AppState {
     connect_animation_start: Option<Instant>,
     disconnect_animation_start: Option<Instant>,
     last_notification: Option<ToastNotification>,
+    connection_notification_pending: bool,
     update_pending: Option<update_check::UpdateAvailable>,
     proxybridge_running: bool,
     selected_processes: Vec<String>,
