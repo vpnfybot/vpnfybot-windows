@@ -10,6 +10,9 @@ const PROXYBRIDGE_ELEVATED_START_WAIT_TIMEOUT: Duration = Duration::from_secs(30
 const PROXYBRIDGE_START_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const PROXYBRIDGE_START_SCAN_WINDOW_BYTES: usize = 1024;
 const PROXYBRIDGE_START_DIAGNOSTIC_BYTES: usize = 16 * 1024;
+const PROXYBRIDGE_VERBOSE_LEVEL: &str = "1";
+const DEFAULT_WIREGUARD_MTU: u16 = 1360;
+const WIREPROXY_SOCKS_BIND_ADDRESS: &str = "0.0.0.0:1080";
 
 static PROCESS_LIST_CACHE: OnceLock<Mutex<Option<ProcessListCache>>> = OnceLock::new();
 static PROCESS_LIST_REFRESH_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -36,18 +39,211 @@ fn save_config_to_cache(conf_path: &str) {
         let temp_config_name = format!("{}_wireproxy_{}.conf", original_name, timestamp);
         let temp_config_path = cache_dir.join(&temp_config_name);
 
-        let mut final_config = config_content.clone();
-        if !final_config.contains("[Socks5]") {
-            if !final_config.ends_with('\n') {
-                final_config.push('\n');
-            }
-            final_config.push('\n');
-            final_config.push_str("[Socks5]\n");
-            final_config.push_str("BindAddress = 0.0.0.0:1080\n");
-        }
-
+        let final_config = normalize_wireproxy_config(&config_content);
         let _ = fs::write(&temp_config_path, final_config);
     }
+}
+
+fn config_line_without_comment(line: &str) -> &str {
+    line.split(|ch| matches!(ch, '#' | ';'))
+        .next()
+        .unwrap_or_default()
+        .trim()
+}
+
+fn config_section_name(line: &str) -> Option<&str> {
+    let line = config_line_without_comment(line);
+    if line.starts_with('[') && line.ends_with(']') {
+        Some(line.trim_matches(['[', ']']).trim())
+    } else {
+        None
+    }
+}
+
+fn normalize_wireproxy_address_line(value: &str) -> Option<String> {
+    for entry in value.split(',').map(str::trim) {
+        let address = entry.split('/').next().unwrap_or_default().trim();
+        if address.parse::<std::net::Ipv4Addr>().is_ok() {
+            return Some(format!("Address = {}/32", address));
+        }
+    }
+
+    None
+}
+
+fn normalize_wireproxy_config_line(line: &str, current_section: &str) -> String {
+    let clean_line = config_line_without_comment(line);
+    let Some((key, value)) = clean_line.split_once('=') else {
+        return line.to_string();
+    };
+
+    let key = key.trim();
+    let value = value.trim();
+
+    if current_section.eq_ignore_ascii_case("Interface") && key.eq_ignore_ascii_case("Address") {
+        return normalize_wireproxy_address_line(value).unwrap_or_else(|| line.to_string());
+    }
+
+    if current_section.eq_ignore_ascii_case("Peer")
+        && key.eq_ignore_ascii_case("PersistentKeepalive")
+        && value == "0"
+    {
+        return "PersistentKeepalive = 25".to_string();
+    }
+
+    line.to_string()
+}
+
+fn is_amnezia_wireguard_config_content(config: &str) -> bool {
+    let mut current_section = "";
+
+    for raw_line in config.lines() {
+        let line = config_line_without_comment(raw_line);
+        if line.is_empty() {
+            continue;
+        }
+
+        if let Some(section) = config_section_name(line) {
+            current_section = section;
+            continue;
+        }
+
+        if !current_section.eq_ignore_ascii_case("Interface") {
+            continue;
+        }
+
+        let Some((key, _value)) = line.split_once('=') else {
+            continue;
+        };
+
+        if is_amnezia_wireguard_key(key.trim()) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn is_amnezia_wireguard_key(key: &str) -> bool {
+    let normalized = key.to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "jc" | "jmin"
+            | "jmax"
+            | "s1"
+            | "s2"
+            | "s3"
+            | "s4"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "i1"
+            | "i2"
+            | "i3"
+            | "i4"
+            | "i5"
+    )
+}
+
+fn interface_has_mtu(config: &str) -> bool {
+    let mut current_section = "";
+
+    for raw_line in config.lines() {
+        let line = config_line_without_comment(raw_line);
+        if line.is_empty() {
+            continue;
+        }
+
+        if let Some(section) = config_section_name(line) {
+            current_section = section;
+            continue;
+        }
+
+        if !current_section.eq_ignore_ascii_case("Interface") {
+            continue;
+        }
+
+        let Some((key, _value)) = line.split_once('=') else {
+            continue;
+        };
+
+        if key.trim().eq_ignore_ascii_case("MTU") {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn normalize_wireproxy_config(config_content: &str) -> String {
+    let mut final_config = String::new();
+    let mut current_section = String::new();
+    let mut has_socks5 = false;
+    let mut has_resolve = false;
+    let add_default_mtu =
+        !is_amnezia_wireguard_config_content(config_content) && !interface_has_mtu(config_content);
+    let mut default_mtu_added = false;
+
+    for line in config_content.lines() {
+        if let Some(section) = config_section_name(line) {
+            if current_section.eq_ignore_ascii_case("Interface")
+                && add_default_mtu
+                && !default_mtu_added
+            {
+                final_config.push_str(&format!("MTU = {}\n", DEFAULT_WIREGUARD_MTU));
+                default_mtu_added = true;
+            }
+
+            current_section.clear();
+            current_section.push_str(section);
+            if section.eq_ignore_ascii_case("Socks5") {
+                has_socks5 = true;
+            } else if section.eq_ignore_ascii_case("Resolve") {
+                has_resolve = true;
+            }
+        }
+
+        let processed_line = normalize_wireproxy_config_line(line, &current_section);
+        final_config.push_str(&processed_line);
+        final_config.push('\n');
+
+        let clean_line = config_line_without_comment(line);
+        if current_section.eq_ignore_ascii_case("Interface")
+            && add_default_mtu
+            && !default_mtu_added
+            && clean_line
+                .split_once('=')
+                .map(|(key, _value)| key.trim().eq_ignore_ascii_case("Address"))
+                .unwrap_or(false)
+        {
+            final_config.push_str(&format!("MTU = {}\n", DEFAULT_WIREGUARD_MTU));
+            default_mtu_added = true;
+        }
+    }
+
+    if current_section.eq_ignore_ascii_case("Interface") && add_default_mtu && !default_mtu_added {
+        final_config.push_str(&format!("MTU = {}\n", DEFAULT_WIREGUARD_MTU));
+    }
+
+    if !has_socks5 {
+        if !final_config.ends_with('\n') {
+            final_config.push('\n');
+        }
+        final_config.push('\n');
+        final_config.push_str("[Socks5]\n");
+        final_config.push_str("BindAddress = ");
+        final_config.push_str(WIREPROXY_SOCKS_BIND_ADDRESS);
+        final_config.push('\n');
+    }
+
+    if !has_resolve {
+        final_config.push('\n');
+        final_config.push_str("[Resolve]\n");
+        final_config.push_str("ResolveStrategy = ipv4\n");
+    }
+
+    final_config
 }
 
 pub(super) fn allocate_wireproxy_info_addr() -> Result<String, String> {
@@ -390,6 +586,16 @@ fn append_bounded_log(buffer: &mut String, chunk: &str, max_bytes: usize) {
     buffer.drain(..keep_from);
 }
 
+fn reset_proxybridge_log(log_path: &Path) -> Result<(), String> {
+    if let Some(parent) = log_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Не удалось создать папку логов ProxyBridge: {}", e))?;
+    }
+
+    fs::write(log_path, "")
+        .map_err(|e| format!("Не удалось очистить лог ProxyBridge перед запуском: {}", e))
+}
+
 fn proxybridge_start_succeeded(output: &str) -> bool {
     output.contains("ProxyBridge started")
         || output.contains("ProxyBridge started.")
@@ -508,34 +714,7 @@ pub(super) fn create_and_start_service(conf: &str) -> ServiceResult {
         }
     };
 
-    let mut final_config = String::new();
-
-    for line in config_content.lines() {
-        let processed_line = if line.starts_with("Address =") {
-            if let Some(ipv4_part) = line.split(',').next() {
-                ipv4_part
-                    .replace("/24", "/32")
-                    .replace("/25", "/32")
-                    .replace("/23", "/32")
-                    .replace("/22", "/32")
-            } else {
-                line.to_string()
-            }
-        } else if line.contains("PersistentKeepalive = 0") {
-            "PersistentKeepalive = 25".to_string()
-        } else {
-            line.to_string()
-        };
-
-        final_config.push_str(&processed_line);
-        final_config.push('\n');
-    }
-
-    if !final_config.contains("[Socks5]") {
-        final_config.push('\n');
-        final_config.push_str("[Socks5]\n");
-        final_config.push_str("BindAddress = 0.0.0.0:1080\n");
-    }
+    let final_config = normalize_wireproxy_config(&config_content);
 
     let runtime_config_path = super::managed_cache_dir().join("vpnfy_wireproxy_temp.conf");
     if let Err(e) = fs::write(&runtime_config_path, &final_config) {
@@ -1055,7 +1234,11 @@ pub(super) fn start_proxybridge(
     let cache_dir = super::managed_cache_dir();
     let log_path = super::managed_logs_dir().join("proxybridge.log");
     let pid_file = cache_dir.join("proxybridge.pid");
+    // wireproxy supports DNS UDP through UDPProxyTunnel, not through SOCKS5 UDP.
+    let dns_via_proxy = "False";
     let localhost_via_proxy = "False";
+
+    reset_proxybridge_log(&log_path)?;
 
     if super::is_elevated() {
         let log_file = OpenOptions::new()
@@ -1075,11 +1258,11 @@ pub(super) fn start_proxybridge(
         cmd.arg("--proxy")
             .arg("socks5://127.0.0.1:1080")
             .arg("--dns-via-proxy")
-            .arg("False")
+            .arg(dns_via_proxy)
             .arg("--localhost-via-proxy")
             .arg(localhost_via_proxy)
             .arg("--verbose")
-            .arg("3")
+            .arg(PROXYBRIDGE_VERBOSE_LEVEL)
             .stdout(std::process::Stdio::from(log_file))
             .stderr(std::process::Stdio::from(log_file_err))
             .current_dir(cli_exe.parent().unwrap_or(&exe_dir))
@@ -1122,9 +1305,11 @@ pub(super) fn start_proxybridge(
         cli_exe.parent().unwrap_or(&cache_dir).display()
     ));
     let mut cmdline = format!(
-        "\"{}\" --proxy socks5://127.0.0.1:1080 --dns-via-proxy False --localhost-via-proxy {} --verbose 3",
+        "\"{}\" --proxy socks5://127.0.0.1:1080 --dns-via-proxy {} --localhost-via-proxy {} --verbose {}",
         cli_exe.display(),
-        localhost_via_proxy
+        dns_via_proxy,
+        localhost_via_proxy,
+        PROXYBRIDGE_VERBOSE_LEVEL
     );
     for r in &rules {
         let safe = r.replace('"', "\\\"");
@@ -1219,6 +1404,90 @@ mod tests {
             std::process::id(),
             unique
         ))
+    }
+
+    #[test]
+    fn normalizes_standard_wireguard_config_for_wireproxy() {
+        let config = r#"[Interface]
+Address=fd42::2/128, 10.7.0.2/24
+PrivateKey = abc
+DNS = 10.7.0.1
+
+[Peer]
+PublicKey = def
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = example.com:51820
+PersistentKeepalive=0
+"#;
+
+        let normalized = normalize_wireproxy_config(config);
+
+        assert!(normalized.contains("Address = 10.7.0.2/32"));
+        assert!(normalized.contains("MTU = 1360"));
+        assert!(normalized.contains("PersistentKeepalive = 25"));
+        assert!(normalized.contains("[Socks5]\nBindAddress = 0.0.0.0:1080"));
+        assert!(normalized.contains("[Resolve]\nResolveStrategy = ipv4"));
+    }
+
+    #[test]
+    fn preserves_explicit_wireguard_mtu() {
+        let config = r#"[Interface]
+Address = 10.7.0.2/32
+MTU = 1280
+PrivateKey = abc
+
+[Peer]
+PublicKey = def
+Endpoint = example.com:51820
+"#;
+
+        let normalized = normalize_wireproxy_config(config);
+
+        assert!(normalized.contains("MTU = 1280"));
+        assert!(!normalized.contains("MTU = 1360"));
+    }
+
+    #[test]
+    fn does_not_add_default_mtu_to_amnezia_wireguard_config() {
+        let config = r#"[Interface]
+Address = 10.9.0.3/32
+PrivateKey = abc
+Jc = 10
+Jmin = 138
+
+[Peer]
+PublicKey = def
+Endpoint = example.com:9443
+"#;
+
+        let normalized = normalize_wireproxy_config(config);
+
+        assert!(!normalized.contains("MTU = 1360"));
+    }
+
+    #[test]
+    fn keeps_existing_wireproxy_sections() {
+        let config = r#"[Interface]
+Address = 10.7.0.2/32
+PrivateKey = abc
+
+[Peer]
+PublicKey = def
+Endpoint = example.com:51820
+
+[socks5]
+BindAddress = 127.0.0.1:1080
+
+[resolve]
+ResolveStrategy = auto
+"#;
+
+        let normalized = normalize_wireproxy_config(config);
+
+        assert_eq!(normalized.matches("[Socks5]").count(), 0);
+        assert_eq!(normalized.matches("[Resolve]").count(), 0);
+        assert!(normalized.contains("[socks5]\nBindAddress = 127.0.0.1:1080"));
+        assert!(normalized.contains("[resolve]\nResolveStrategy = auto"));
     }
 
     #[test]
