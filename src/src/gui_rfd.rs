@@ -32,7 +32,7 @@ use image::AnimationDecoder;
 use raw_window_handle::{HasRawWindowHandle, HasWindowHandle, RawWindowHandle};
 use resvg::{tiny_skia, usvg};
 use rfd::FileDialog;
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::BTreeSet;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -115,13 +115,6 @@ struct TunnelTrafficSample {
     captured_at: Instant,
 }
 
-#[derive(Clone)]
-struct TrafficHistoryPoint {
-    upload_bps: f64,
-    download_bps: f64,
-    captured_at: Instant,
-}
-
 struct SubscriptionInfo {
     expires_at_unix: i64,
     display_date: String,
@@ -153,8 +146,6 @@ const SITE_WHEEL_STEP: i32 = 3;
 const UI_BUTTON_FONT_SIZE: f32 = 14.0;
 const BUTTON_FONT_FAMILY_NAME: &str = "vpnfy_button_font";
 const TUNNEL_TRAFFIC_POLL_INTERVAL: Duration = Duration::from_secs(1);
-const TASKBAR_TRAFFIC_HISTORY_WINDOW: Duration = Duration::from_secs(60);
-const TASKBAR_TRAFFIC_HISTORY_CAPACITY: usize = 60;
 const AMNEZIA_WIREGUARD_DISPLAY_LABEL: &str = "AmneziaWG";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -223,8 +214,6 @@ impl Language {
                 "Установить" => "Install",
                 "Позже" => "Later",
                 "Активна до: {}" => "Active until: {}",
-                "Виджет: включено" => "Widget: enabled",
-                "Виджет: выключено" => "Widget: disabled",
                 _ => key,
             },
             Language::Ru => key,
@@ -263,7 +252,6 @@ struct AppState {
     // Latest computed speeds in bytes/sec
     last_upload_bps: f64,
     last_download_bps: f64,
-    traffic_history: VecDeque<TrafficHistoryPoint>,
     upload_icon: Option<egui::TextureHandle>,
     download_icon: Option<egui::TextureHandle>,
     top_image: Option<egui::TextureHandle>,
@@ -282,11 +270,6 @@ struct AppState {
     tray_icon_added: bool,
     tray_window: Option<HWND>,
     tray_icon: Option<HICON>,
-    #[cfg(target_os = "windows")]
-    taskbar_widget_window: Option<HWND>,
-    #[cfg(target_os = "windows")]
-    taskbar_widget_monitor: Option<windows::Win32::Graphics::Gdi::HMONITOR>,
-    taskbar_widget_enabled: bool,
     traffic_opacity: f32,
     import_button_opacity: f32,
     connect_animation_start: Option<Instant>,

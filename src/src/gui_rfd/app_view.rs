@@ -1,4 +1,4 @@
-use super::app_windows::{open_url, show_error_dialog, taskbar_alignment_is_centered};
+use super::app_windows::{open_url, show_error_dialog};
 use super::*;
 
 impl App for AppState {
@@ -1145,6 +1145,10 @@ impl App for AppState {
                     }
                     if controls_locked_by_settings && import_button_response.hovered() {
                         ctx.set_cursor_icon(egui::CursorIcon::Default);
+                    } else if import_button_response.hovered()
+                        && (self.service_running || self.service_active)
+                    {
+                        ctx.set_cursor_icon(egui::CursorIcon::Default);
                     } else {
                         apply_button_cursor(ctx, &import_button_response, import_button_enabled);
                     }
@@ -1343,20 +1347,13 @@ impl App for AppState {
                     }
 
                     ui.add_space(gap);
-                    let _traffic_alpha =
-                        (self.traffic_opacity * 255.0).round().clamp(0.0, 255.0) as u8;
-                    let text_alpha: u8 = 255u8;
                     let text_width = connect_rect.width().min(ui.available_width());
-                    let (text_rect, _) = ui.allocate_exact_size(
+                    let (_status_spacer_rect, _) = ui.allocate_exact_size(
                         egui::vec2(text_width, connect_rect.height()),
                         egui::Sense::hover(),
                     );
 
                     let ppp = ctx.pixels_per_point();
-                    let text_nudge = 16.0 / ppp;
-                    let shifted_rect = text_rect.translate(egui::vec2(0.0, -text_nudge));
-                    let text_position =
-                        shifted_rect.center() + egui::vec2(0.0, -(4.0 + 2.0 / ppp));
 
                     if self
                         .last_time_display_update
@@ -1371,74 +1368,15 @@ impl App for AppState {
 
                         self.last_time_display_update = Some(Instant::now());
                     }
-                    let display_text = &self.cached_time_display;
                     let subscription_expired = self.connected_at.is_none()
                         && self.subscription_for_date_display.is_some()
                         && self.subscription_is_expired();
-                    let text_color = if subscription_expired {
+                    let center_status_text = self.cached_time_display.clone();
+                    let center_status_color = if subscription_expired {
                         egui::Color32::RED
                     } else {
-                        egui::Color32::from_white_alpha(text_alpha)
+                        egui::Color32::from_white_alpha(255)
                     };
-
-                    #[cfg(target_os = "windows")]
-                    {
-                        let ppp = ctx.pixels_per_point();
-                        let w_px = (text_rect.width() * ppp).ceil() as usize;
-                        let h_px = (text_rect.height() * ppp).ceil() as usize;
-                        let key = format!(
-                            "center_mode_display:{}:{}:{}:{}",
-                            display_text, w_px, h_px, subscription_expired
-                        );
-                        if let Some(tex) = self.win_text_cache.get(&key) {
-                            ui.painter().image(
-                                tex.id(),
-                                shifted_rect,
-                                egui::Rect::from_min_max(
-                                    egui::pos2(0.0, 0.0),
-                                    egui::pos2(1.0, 1.0),
-                                ),
-                                egui::Color32::WHITE,
-                            );
-                        } else if let Some(tex) = win_text_to_texture(
-                            ctx,
-                            &key,
-                            &display_text,
-                            self.button_hfont,
-                            text_color,
-                            w_px,
-                            h_px,
-                        ) {
-                            self.win_text_cache.insert(key.clone(), tex.clone());
-                            ui.painter().image(
-                                tex.id(),
-                                shifted_rect,
-                                egui::Rect::from_min_max(
-                                    egui::pos2(0.0, 0.0),
-                                    egui::pos2(1.0, 1.0),
-                                ),
-                                egui::Color32::WHITE,
-                            );
-                        } else {
-                            ui.painter().text(
-                                text_position,
-                                egui::Align2::CENTER_CENTER,
-                                &display_text,
-                                egui::FontId::default(),
-                                text_color,
-                            );
-                        }
-                    }
-                    #[cfg(not(target_os = "windows"))]
-                    {
-                        ui.painter().text(
-                            text_position,
-                            egui::Align2::CENTER_CENTER,
-                            display_text,
-                            egui::FontId::default(),
-                            text_color,
-                        );
-                    }
 
                     let pad_points = 12.0 / ppp;
                     let speed_alpha = if self.service_active { 255u8 } else { 0u8 };
@@ -1700,7 +1638,6 @@ impl App for AppState {
                                     self.last_tunnel_totals = None;
                                     self.last_upload_bps = 0.0;
                                     self.last_download_bps = 0.0;
-                                    self.traffic_history.clear();
                                     self.last_time_display_update = None;
                                     self.cached_time_display.clear();
                                     self.cached_up_display.clear();
@@ -1889,11 +1826,6 @@ impl App for AppState {
                                 self.connection_notification_pending = false;
                             }
                         }
-                    }
-
-                    #[cfg(target_os = "windows")]
-                    {
-                        self.update_taskbar_traffic_widget();
                     }
 
                     let target_traffic_opacity = if self.service_active { 1.0 } else { 0.0 };
@@ -2094,15 +2026,6 @@ impl App for AppState {
                                         } else {
                                             self.language.translate("В режиме \"Вся система\" сайты из списка \"Исключенные сайты\" и приложения из списка \"Исключенные приложения\" будут исключены из VPN туннеля")
                                         };
-                                        let taskbar_widget_available =
-                                            taskbar_alignment_is_centered();
-                                        let taskbar_widget_effective_enabled =
-                                            self.taskbar_widget_enabled && taskbar_widget_available;
-                                        let widget_button_text = if taskbar_widget_effective_enabled {
-                                            self.language.translate("Виджет: включено")
-                                        } else {
-                                            self.language.translate("Виджет: выключено")
-                                        };
                                         let mode_enabled = !self.service_active;
                                         let (settings_rect, _) = ui.allocate_exact_size(
                                             egui::vec2(ui.available_width(), ui.available_height()),
@@ -2139,8 +2062,6 @@ impl App for AppState {
                                         let process_rect = mode_rect
                                             .translate(egui::vec2(0.0, -(button_height + button_spacing)));
                                         let sites_rect = process_rect
-                                            .translate(egui::vec2(0.0, -(button_height + button_spacing)));
-                                        let widget_rect = sites_rect
                                             .translate(egui::vec2(0.0, -(button_height + button_spacing)));
 
                                         let description_width = ((settings_rect.width() * 0.7)
@@ -2189,7 +2110,7 @@ impl App for AppState {
                                         }
                                         let description_top = settings_rect.top();
                                         let description_bottom =
-                                            (widget_rect.top() - button_spacing).max(description_top);
+                                            (sites_rect.top() - button_spacing).max(description_top);
                                         let description_center_y = description_top
                                             + ((description_bottom - description_top) * 0.5);
                                         let line_spacing = 2.0;
@@ -2321,119 +2242,6 @@ impl App for AppState {
                                                 },
                                             );
                                         });
-                                        let widget_response = ui.interact(
-                                            widget_rect,
-                                            ui.id().with("settings_taskbar_widget_button"),
-                                            if taskbar_widget_available {
-                                                egui::Sense::click()
-                                            } else {
-                                                egui::Sense::hover()
-                                            },
-                                        );
-                                        let widget_alpha_val = if taskbar_widget_available {
-                                            button_alpha(&widget_response, 255)
-                                        } else {
-                                            128
-                                        };
-                                        let widget_fill = if taskbar_widget_effective_enabled {
-                                            egui::Color32::from_rgba_unmultiplied(
-                                                255,
-                                                255,
-                                                255,
-                                                widget_alpha_val,
-                                            )
-                                        } else {
-                                            egui::Color32::from_rgba_unmultiplied(
-                                                180,
-                                                80,
-                                                80,
-                                                widget_alpha_val,
-                                            )
-                                        };
-                                        let widget_text_color = egui::Color32::from_rgba_unmultiplied(
-                                            0,
-                                            0,
-                                            0,
-                                            widget_alpha_val,
-                                        );
-                                        ui.painter().rect_filled(widget_rect, 6.0, widget_fill);
-                                        #[cfg(target_os = "windows")]
-                                        {
-                                            let ppp = ctx.pixels_per_point();
-                                            let w_px = (widget_rect.width() * ppp).ceil() as usize;
-                                            let h_px = (widget_rect.height() * ppp).ceil() as usize;
-                                            let key = format!(
-                                                "settings_taskbar_widget:{}:{}:{}:{}",
-                                                widget_button_text, w_px, h_px, widget_alpha_val
-                                            );
-
-                                            if let Some(tex) = self.win_text_cache.get(&key) {
-                                                ui.painter().image(
-                                                    tex.id(),
-                                                    widget_rect,
-                                                    egui::Rect::from_min_max(
-                                                        egui::pos2(0.0, 0.0),
-                                                        egui::pos2(1.0, 1.0),
-                                                    ),
-                                                    egui::Color32::WHITE,
-                                                );
-                                            } else if let Some(tex) = win_text_to_texture(
-                                                ctx,
-                                                &key,
-                                                widget_button_text,
-                                                self.button_hfont,
-                                                widget_text_color,
-                                                w_px,
-                                                h_px,
-                                            ) {
-                                                self.win_text_cache.insert(key.clone(), tex.clone());
-                                                ui.painter().image(
-                                                    tex.id(),
-                                                    widget_rect,
-                                                    egui::Rect::from_min_max(
-                                                        egui::pos2(0.0, 0.0),
-                                                        egui::pos2(1.0, 1.0),
-                                                    ),
-                                                    egui::Color32::WHITE,
-                                                );
-                                            } else {
-                                                ui.painter().text(
-                                                    widget_rect.center(),
-                                                    egui::Align2::CENTER_CENTER,
-                                                    widget_button_text,
-                                                    button_font.clone(),
-                                                    widget_text_color,
-                                                );
-                                            }
-                                        }
-                                        #[cfg(not(target_os = "windows"))]
-                                        {
-                                            ui.painter().text(
-                                                widget_rect.center(),
-                                                egui::Align2::CENTER_CENTER,
-                                                widget_button_text,
-                                                button_font.clone(),
-                                                widget_text_color,
-                                            );
-                                        }
-                                        apply_button_cursor(
-                                            ctx,
-                                            &widget_response,
-                                            taskbar_widget_available,
-                                        );
-                                        if widget_response.clicked() && taskbar_widget_available {
-                                            self.taskbar_widget_enabled = !self.taskbar_widget_enabled;
-                                            save_taskbar_widget_enabled(self.taskbar_widget_enabled);
-                                            #[cfg(target_os = "windows")]
-                                            {
-                                                if self.taskbar_widget_enabled {
-                                                    self.update_taskbar_traffic_widget();
-                                                } else {
-                                                    self.destroy_taskbar_traffic_widget();
-                                                }
-                                            }
-                                        }
-
                                         let process_response = ui.interact(
                                             process_rect,
                                             ui.id().with("settings_process_button"),
@@ -2705,7 +2513,7 @@ impl App for AppState {
 
                     ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                         ui.add_space(10.0);
-                        {
+                        let version_response = {
                             let version_text = if update_check::UPDATE_CHECK_RUNNING
                                 .get()
                                 .map(|b| b.load(std::sync::atomic::Ordering::Relaxed))
@@ -2719,9 +2527,8 @@ impl App for AppState {
                                 egui::RichText::new(version_text)
                                     .color(egui::Color32::from_white_alpha(64))
                                     .text_style(egui::TextStyle::Button),
-                            );
-                        }
-                        ui.add_space(10.0);
+                            )
+                        };
                         let link_enabled = !controls_locked_by_settings;
                         let link_text = "t.me/vpnfybot";
                         let link_color = egui::Color32::from_rgb(0, 170, 255);
@@ -2729,13 +2536,18 @@ impl App for AppState {
                             fonts.layout_no_wrap(link_text.to_string(), button_font.clone(), link_color)
                         });
                         let ppp = ctx.pixels_per_point();
+                        let footer_gap = 4.0 / ppp;
                         let extra_px = 20.0f32;
                         let extra_points = extra_px / ppp;
-                        let extra_y_px = 12.0f32;
-                        let extra_y_points = extra_y_px / ppp;
                         let widget_size = egui::vec2(galley.size().x + extra_points, galley.size().y);
-                        let (link_rect, response) = ui.allocate_exact_size(
-                            widget_size,
+                        let link_center = egui::pos2(
+                            version_response.rect.center().x,
+                            version_response.rect.min.y - footer_gap - widget_size.y * 0.5,
+                        );
+                        let link_rect = egui::Rect::from_center_size(link_center, widget_size);
+                        let response = ui.interact(
+                            link_rect,
+                            ui.id().with("footer_link"),
                             if link_enabled {
                                 egui::Sense::click()
                             } else {
@@ -2752,7 +2564,7 @@ impl App for AppState {
                             if let Some(tex) = self.win_text_cache.get(&key) {
                                 ui.painter().image(
                                     tex.id(),
-                                    link_rect.translate(egui::vec2(0.0, extra_y_points)),
+                                    link_rect,
                                     egui::Rect::from_min_max(
                                         egui::pos2(0.0, 0.0),
                                         egui::pos2(1.0, 1.0),
@@ -2771,7 +2583,70 @@ impl App for AppState {
                                 self.win_text_cache.insert(key.clone(), tex.clone());
                                 ui.painter().image(
                                     tex.id(),
-                                    link_rect.translate(egui::vec2(0.0, extra_y_points)),
+                                    link_rect,
+                                    egui::Rect::from_min_max(
+                                        egui::pos2(0.0, 0.0),
+                                        egui::pos2(1.0, 1.0),
+                                    ),
+                                    egui::Color32::WHITE,
+                                );
+                            } else {
+                                ui.painter().galley(link_rect.min, galley.clone(), link_color);
+                            }
+                        }
+                        #[cfg(not(target_os = "windows"))]
+                        {
+                            ui.painter().galley(link_rect.min, galley.clone(), link_color);
+                        }
+
+                        let status_galley = ui.fonts(|fonts| {
+                            fonts.layout_no_wrap(
+                                center_status_text.clone(),
+                                button_font.clone(),
+                                center_status_color,
+                            )
+                        });
+                        let status_size = egui::vec2(
+                            status_galley.size().x + extra_points,
+                            status_galley.size().y.max(1.0 / ppp),
+                        );
+                        let status_center = egui::pos2(
+                            version_response.rect.center().x,
+                            link_rect.min.y - footer_gap - status_size.y * 0.5,
+                        );
+                        let status_rect = egui::Rect::from_center_size(status_center, status_size);
+
+                        #[cfg(target_os = "windows")]
+                        {
+                            let w_px = ((status_rect.width() * ppp).ceil() as usize).max(1);
+                            let h_px = ((status_rect.height() * ppp).ceil() as usize).max(1);
+                            let key = format!(
+                                "footer_center_status:{}:{}:{}:{}",
+                                center_status_text, w_px, h_px, subscription_expired
+                            );
+                            if let Some(tex) = self.win_text_cache.get(&key) {
+                                ui.painter().image(
+                                    tex.id(),
+                                    status_rect,
+                                    egui::Rect::from_min_max(
+                                        egui::pos2(0.0, 0.0),
+                                        egui::pos2(1.0, 1.0),
+                                    ),
+                                    egui::Color32::WHITE,
+                                );
+                            } else if let Some(tex) = win_text_to_texture(
+                                ctx,
+                                &key,
+                                &center_status_text,
+                                self.button_hfont,
+                                center_status_color,
+                                w_px,
+                                h_px,
+                            ) {
+                                self.win_text_cache.insert(key.clone(), tex.clone());
+                                ui.painter().image(
+                                    tex.id(),
+                                    status_rect,
                                     egui::Rect::from_min_max(
                                         egui::pos2(0.0, 0.0),
                                         egui::pos2(1.0, 1.0),
@@ -2780,18 +2655,18 @@ impl App for AppState {
                                 );
                             } else {
                                 ui.painter().galley(
-                                    link_rect.min + egui::vec2(0.0, extra_y_points),
-                                    galley.clone(),
-                                    link_color,
+                                    status_rect.min,
+                                    status_galley.clone(),
+                                    center_status_color,
                                 );
                             }
                         }
                         #[cfg(not(target_os = "windows"))]
                         {
                             ui.painter().galley(
-                                link_rect.min + egui::vec2(0.0, extra_y_points),
-                                galley.clone(),
-                                link_color,
+                                status_rect.min,
+                                status_galley,
+                                center_status_color,
                             );
                         }
 
@@ -2849,10 +2724,6 @@ impl App for AppState {
         }
 
         self.remove_tray_icon();
-        #[cfg(target_os = "windows")]
-        {
-            self.destroy_taskbar_traffic_widget();
-        }
         if let Some(font) = self.button_hfont.take() {
             unsafe {
                 let _ = DeleteObject(font);

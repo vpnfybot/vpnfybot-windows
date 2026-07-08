@@ -1,7 +1,3 @@
-#[cfg(target_os = "windows")]
-use super::app_windows::{
-    publish_taskbar_traffic_widget_snapshot, set_taskbar_traffic_widget_worker_enabled,
-};
 use super::*;
 
 const SUBSCRIPTION_SCHEDULED_TASK_NAME: &str = "vpnfybot-windows-subscription-check";
@@ -18,7 +14,6 @@ impl Default for AppState {
         let selected_processes = load_selected_processes();
         let selected_sites = load_selected_sites();
         let proxy_mode_toggle = load_proxy_mode();
-        let taskbar_widget_enabled = load_taskbar_widget_enabled();
         let language = load_language();
 
         let mut s = Self {
@@ -47,7 +42,6 @@ impl Default for AppState {
             cached_down_display: "0.00".to_string(),
             last_upload_bps: 0.0,
             last_download_bps: 0.0,
-            traffic_history: VecDeque::new(),
             upload_icon: None,
             download_icon: None,
             top_image: None,
@@ -66,11 +60,6 @@ impl Default for AppState {
             tray_icon_added: false,
             tray_window: None,
             tray_icon: None,
-            #[cfg(target_os = "windows")]
-            taskbar_widget_window: None,
-            #[cfg(target_os = "windows")]
-            taskbar_widget_monitor: None,
-            taskbar_widget_enabled,
             traffic_opacity: 0.0,
             import_button_opacity: 1.0,
             connect_animation_start: None,
@@ -186,66 +175,17 @@ impl AppState {
             return;
         };
 
-        #[cfg(target_os = "windows")]
-        set_taskbar_traffic_widget_worker_enabled(self.taskbar_widget_enabled);
-
         let (tx, rx) = mpsc::channel();
         let stop_flag = Arc::new(AtomicBool::new(false));
         let worker_stop = stop_flag.clone();
 
         thread::spawn(move || {
-            let mut worker_last_totals = None;
-            let mut worker_last_poll = None;
-            let mut worker_history: VecDeque<TrafficHistoryPoint> = VecDeque::new();
-
             while !worker_stop.load(Ordering::Relaxed) {
                 if let Some((tx_bytes, rx_bytes)) = fetch_wireproxy_metrics(&info_addr)
                     .and_then(|metrics| parse_wireproxy_metrics_rx_tx(&metrics))
                 {
                     let captured_at = Instant::now();
                     let total_bytes = tx_bytes.saturating_add(rx_bytes);
-                    let (upload_bps, download_bps) =
-                        if let Some((prev_tx, prev_rx)) = worker_last_totals {
-                            let elapsed = worker_last_poll
-                                .map(|previous| captured_at.duration_since(previous))
-                                .unwrap_or(TUNNEL_TRAFFIC_POLL_INTERVAL);
-                            let secs = elapsed.as_secs_f64().max(0.000_001);
-                            (
-                                tx_bytes.saturating_sub(prev_tx) as f64 / secs,
-                                rx_bytes.saturating_sub(prev_rx) as f64 / secs,
-                            )
-                        } else {
-                            (0.0, 0.0)
-                        };
-
-                    worker_history.push_back(TrafficHistoryPoint {
-                        upload_bps,
-                        download_bps,
-                        captured_at,
-                    });
-                    while worker_history.len() > TASKBAR_TRAFFIC_HISTORY_CAPACITY {
-                        let _ = worker_history.pop_front();
-                    }
-                    while worker_history.front().is_some_and(|point| {
-                        captured_at.duration_since(point.captured_at)
-                            > TASKBAR_TRAFFIC_HISTORY_WINDOW
-                    }) {
-                        let _ = worker_history.pop_front();
-                    }
-
-                    #[cfg(target_os = "windows")]
-                    publish_taskbar_traffic_widget_snapshot(
-                        true,
-                        upload_bps,
-                        download_bps,
-                        worker_history
-                            .iter()
-                            .map(|point| (point.upload_bps, point.download_bps))
-                            .collect(),
-                    );
-
-                    worker_last_totals = Some((tx_bytes, rx_bytes));
-                    worker_last_poll = Some(captured_at);
 
                     let sample = TunnelTrafficSample {
                         total_bytes,
@@ -279,8 +219,6 @@ impl AppState {
         if let Some(stop_flag) = self.traffic_worker_stop.take() {
             stop_flag.store(true, Ordering::Relaxed);
         }
-        #[cfg(target_os = "windows")]
-        publish_taskbar_traffic_widget_snapshot(false, 0.0, 0.0, Vec::new());
         self.traffic_worker_receiver = None;
     }
 
@@ -315,21 +253,6 @@ impl AppState {
             self.last_upload_bps = 0.0;
             self.last_download_bps = 0.0;
         }
-
-        self.traffic_history.push_back(TrafficHistoryPoint {
-            upload_bps: self.last_upload_bps,
-            download_bps: self.last_download_bps,
-            captured_at: sample.captured_at,
-        });
-        while self.traffic_history.len() > TASKBAR_TRAFFIC_HISTORY_CAPACITY {
-            let _ = self.traffic_history.pop_front();
-        }
-        while self.traffic_history.front().is_some_and(|point| {
-            sample.captured_at.duration_since(point.captured_at) > TASKBAR_TRAFFIC_HISTORY_WINDOW
-        }) {
-            let _ = self.traffic_history.pop_front();
-        }
-
         self.last_tunnel_totals = Some((sample.tx_bytes, sample.rx_bytes));
         self.last_tunnel_traffic_poll = Some(sample.captured_at);
         true
@@ -344,7 +267,6 @@ impl AppState {
         self.last_tunnel_totals = None;
         self.last_upload_bps = 0.0;
         self.last_download_bps = 0.0;
-        self.traffic_history.clear();
         self.last_time_display_update = None;
         self.cached_time_display.clear();
         self.cached_up_display.clear();
@@ -466,7 +388,6 @@ impl AppState {
         self.proxybridge_running = false;
         self.reset_tunnel_traffic_state();
         self.connected_at = None;
-        self.taskbar_widget_enabled = true;
         self.reset_subscription_info_display();
         self.startup_animation_frame = 0;
         self.traffic_opacity = 0.0;
