@@ -1,6 +1,8 @@
 use super::*;
 
 #[cfg(target_os = "windows")]
+use std::ffi::c_void;
+#[cfg(target_os = "windows")]
 use std::mem::ManuallyDrop;
 #[cfg(target_os = "windows")]
 use windows::core::{ComInterface, GUID, HRESULT, PWSTR};
@@ -8,9 +10,10 @@ use windows::core::{ComInterface, GUID, HRESULT, PWSTR};
 use windows::Win32::Foundation::SIZE;
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CreatePen, EndPaint, GetMonitorInfoW, GetTextExtentPoint32W, HMONITOR,
-    InvalidateRect, LineTo, MonitorFromWindow, MoveToEx, DRAW_TEXT_FORMAT, DT_LEFT, MONITORINFO,
-    MONITOR_DEFAULTTONEAREST, PAINTSTRUCT, PS_SOLID,
+    BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreatePen, DeleteDC, EndPaint,
+    GetMonitorInfoW, GetTextExtentPoint32W, InvalidateRect, LineTo, MonitorFromWindow, MoveToEx,
+    DRAW_TEXT_FORMAT, DT_LEFT, HDC, HMONITOR, MONITORINFO, MONITOR_DEFAULTTONEAREST, PAINTSTRUCT,
+    PS_SOLID, SRCCOPY,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
@@ -26,21 +29,21 @@ use windows::Win32::System::Com::{
 #[cfg(target_os = "windows")]
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 #[cfg(target_os = "windows")]
-use windows::Win32::UI::Shell::{IShellLinkW, PropertiesSystem::IPropertyStore};
+use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Controls::WM_MOUSELEAVE;
 #[cfg(target_os = "windows")]
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    TrackMouseEvent, TRACKMOUSEEVENT, TME_LEAVE,
-};
+use windows::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT};
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::Shell::{IShellLinkW, PropertiesSystem::IPropertyStore};
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetWindowRect, IsWindow,
-    LoadCursorW, RegisterClassW, SetCursor, SetLayeredWindowAttributes, SetWindowPos, FindWindowExW,
-    HWND_TOPMOST, HTCLIENT, IDC_HAND, LWA_COLORKEY, SWP_NOACTIVATE, SWP_NOOWNERZORDER,
-    SWP_SHOWWINDOW, WM_ERASEBKGND, WM_GETOBJECT, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST,
-    WM_PAINT, WM_SETCURSOR, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, FindWindowExW, GetClientRect, GetWindowRect,
+    IsWindow, IsWindowVisible, LoadCursorW, RegisterClassW, SetCursor, SetLayeredWindowAttributes,
+    SetWindowPos, HTCLIENT, HWND_TOPMOST, IDC_HAND, LWA_COLORKEY, SWP_NOACTIVATE,
+    SWP_NOOWNERZORDER, SWP_SHOWWINDOW, WM_ERASEBKGND, WM_GETOBJECT, WM_LBUTTONUP, WM_MOUSEMOVE,
+    WM_NCHITTEST, WM_PAINT, WM_SETCURSOR, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
 };
 
 const TRAY_CALLBACK_MESSAGE: u32 = WM_APP + 1;
@@ -60,9 +63,14 @@ const TASKBAR_TRAFFIC_WIDGET_WIDTH: f32 = 260.0;
 #[cfg(target_os = "windows")]
 const TASKBAR_TRAFFIC_WIDGET_HEIGHT: f32 = 42.0;
 #[cfg(target_os = "windows")]
+const TASKBAR_ALIGNMENT_CACHE_TTL: Duration = Duration::from_secs(2);
+#[cfg(target_os = "windows")]
 static TASKBAR_TRAFFIC_WIDGET_CLASS_REGISTERED: OnceLock<()> = OnceLock::new();
 #[cfg(target_os = "windows")]
 static TASKBAR_TRAFFIC_WIDGET_DATA: OnceLock<Mutex<TaskbarTrafficWidgetSnapshot>> = OnceLock::new();
+#[cfg(target_os = "windows")]
+static TASKBAR_ALIGNMENT_CENTERED_CACHE: OnceLock<Mutex<Option<TaskbarAlignmentCache>>> =
+    OnceLock::new();
 #[cfg(target_os = "windows")]
 static TASKBAR_TRAFFIC_WIDGET_HOVERED: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "windows")]
@@ -78,7 +86,7 @@ struct TaskbarWidgetAnchor {
 }
 
 #[cfg(target_os = "windows")]
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct TaskbarTrafficWidgetSnapshot {
     visible: bool,
     upload_bps: f64,
@@ -99,6 +107,12 @@ impl Default for TaskbarTrafficWidgetSnapshot {
 }
 
 #[cfg(target_os = "windows")]
+struct TaskbarAlignmentCache {
+    centered: bool,
+    checked_at: Instant,
+}
+
+#[cfg(target_os = "windows")]
 fn windows_error(message: impl Into<String>) -> windows::core::Error {
     windows::core::Error::new(HRESULT(0x80004005u32 as i32), HSTRING::from(message.into()))
 }
@@ -106,6 +120,66 @@ fn windows_error(message: impl Into<String>) -> windows::core::Error {
 #[cfg(target_os = "windows")]
 fn taskbar_traffic_widget_data() -> &'static Mutex<TaskbarTrafficWidgetSnapshot> {
     TASKBAR_TRAFFIC_WIDGET_DATA.get_or_init(|| Mutex::new(TaskbarTrafficWidgetSnapshot::default()))
+}
+
+#[cfg(target_os = "windows")]
+fn replace_taskbar_traffic_widget_snapshot(next: TaskbarTrafficWidgetSnapshot) -> bool {
+    let Ok(mut guard) = taskbar_traffic_widget_data().lock() else {
+        return true;
+    };
+
+    if *guard == next {
+        false
+    } else {
+        *guard = next;
+        true
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub(super) fn taskbar_alignment_is_centered() -> bool {
+    let cache = TASKBAR_ALIGNMENT_CENTERED_CACHE.get_or_init(|| Mutex::new(None));
+    if let Ok(mut guard) = cache.lock() {
+        if let Some(cached) = guard.as_ref() {
+            if cached.checked_at.elapsed() <= TASKBAR_ALIGNMENT_CACHE_TTL {
+                return cached.centered;
+            }
+        }
+
+        let centered = read_taskbar_alignment_is_centered();
+        *guard = Some(TaskbarAlignmentCache {
+            centered,
+            checked_at: Instant::now(),
+        });
+        centered
+    } else {
+        read_taskbar_alignment_is_centered()
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn read_taskbar_alignment_is_centered() -> bool {
+    let subkey = to_wide(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced");
+    let value_name = to_wide("TaskbarAl");
+    let mut value = 0u32;
+    let mut value_size = std::mem::size_of::<u32>() as u32;
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            PCWSTR(subkey.as_ptr()),
+            PCWSTR(value_name.as_ptr()),
+            RRF_RT_REG_DWORD,
+            None,
+            Some((&mut value as *mut u32).cast::<c_void>()),
+            Some(&mut value_size),
+        )
+    };
+
+    if status.0 == 0 && value_size as usize == std::mem::size_of::<u32>() {
+        value == 1
+    } else {
+        true
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -121,14 +195,12 @@ pub(super) fn publish_taskbar_traffic_widget_snapshot(
     history: Vec<(f64, f64)>,
 ) {
     let visible = visible && TASKBAR_TRAFFIC_WIDGET_WORKER_ENABLED.load(Ordering::Relaxed);
-    if let Ok(mut guard) = taskbar_traffic_widget_data().lock() {
-        *guard = TaskbarTrafficWidgetSnapshot {
-            visible,
-            upload_bps,
-            download_bps,
-            history,
-        };
-    }
+    let changed = replace_taskbar_traffic_widget_snapshot(TaskbarTrafficWidgetSnapshot {
+        visible,
+        upload_bps,
+        download_bps,
+        history,
+    });
 
     let hwnd_raw = TASKBAR_TRAFFIC_WIDGET_HWND.load(Ordering::Relaxed);
     if hwnd_raw == 0 {
@@ -143,9 +215,10 @@ pub(super) fn publish_taskbar_traffic_widget_snapshot(
         }
 
         if visible {
-            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-            let _ = InvalidateRect(hwnd, None, false);
-        } else {
+            if changed {
+                let _ = InvalidateRect(hwnd, None, false);
+            }
+        } else if changed {
             TASKBAR_TRAFFIC_WIDGET_HOVERED.store(false, Ordering::Relaxed);
             let _ = ShowWindow(hwnd, SW_HIDE);
         }
@@ -340,38 +413,66 @@ fn fallback_taskbar_widget_anchor() -> Option<TaskbarWidgetAnchor> {
 }
 
 #[cfg(target_os = "windows")]
-fn position_taskbar_traffic_widget(hwnd: HWND, anchor: TaskbarWidgetAnchor) {
-    unsafe {
-        let rect = anchor.rect;
-        let taskbar_width = (rect.right - rect.left).max(1);
-        let taskbar_height = (rect.bottom - rect.top).max(1);
-        let (widget_width, widget_height) =
-            widget_dimensions_for_taskbar(taskbar_width, taskbar_height);
-        let vertical = taskbar_height > taskbar_width;
-        let scale = current_ui_scale_factor().max(1.0);
-        let edge_padding = (8.0 * scale).round() as i32;
+fn taskbar_widget_rect_for_anchor(anchor: TaskbarWidgetAnchor) -> RECT {
+    let rect = anchor.rect;
+    let taskbar_width = (rect.right - rect.left).max(1);
+    let taskbar_height = (rect.bottom - rect.top).max(1);
+    let (widget_width, widget_height) =
+        widget_dimensions_for_taskbar(taskbar_width, taskbar_height);
+    let vertical = taskbar_height > taskbar_width;
+    let scale = current_ui_scale_factor().max(1.0);
+    let edge_padding = (8.0 * scale).round() as i32;
 
-        let (x, y) = if vertical {
-            (
-                rect.left + ((taskbar_width - widget_width) / 2).max(edge_padding),
-                rect.top + edge_padding,
-            )
-        } else {
-            (
-                rect.left + edge_padding,
-                rect.top + ((taskbar_height - widget_height) / 2).max(2),
-            )
-        };
+    let (left, top) = if vertical {
+        (
+            rect.left + ((taskbar_width - widget_width) / 2).max(edge_padding),
+            rect.top + edge_padding,
+        )
+    } else {
+        (
+            rect.left + edge_padding,
+            rect.top + ((taskbar_height - widget_height) / 2).max(2),
+        )
+    };
+
+    RECT {
+        left,
+        top,
+        right: left + widget_width,
+        bottom: top + widget_height,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn rect_matches(left: RECT, right: RECT) -> bool {
+    left.left == right.left
+        && left.top == right.top
+        && left.right == right.right
+        && left.bottom == right.bottom
+}
+
+#[cfg(target_os = "windows")]
+fn position_taskbar_traffic_widget(hwnd: HWND, anchor: TaskbarWidgetAnchor) -> bool {
+    unsafe {
+        let target = taskbar_widget_rect_for_anchor(anchor);
+        let mut current = RECT::default();
+        let has_current = GetWindowRect(hwnd, &mut current).as_bool();
+        let already_visible = IsWindowVisible(hwnd).as_bool();
+
+        if has_current && already_visible && rect_matches(current, target) {
+            return false;
+        }
 
         let _ = SetWindowPos(
             hwnd,
             HWND_TOPMOST,
-            x,
-            y,
-            widget_width,
-            widget_height,
+            target.left,
+            target.top,
+            target.right - target.left,
+            target.bottom - target.top,
             SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW,
         );
+        true
     }
 }
 
@@ -528,8 +629,8 @@ unsafe fn paint_taskbar_traffic_widget(hwnd: HWND) {
         .unwrap_or_default();
 
     let mut paint = PAINTSTRUCT::default();
-    let hdc = BeginPaint(hwnd, &mut paint);
-    if hdc.0 == 0 {
+    let target_hdc = BeginPaint(hwnd, &mut paint);
+    if target_hdc.0 == 0 {
         return;
     }
 
@@ -537,6 +638,26 @@ unsafe fn paint_taskbar_traffic_widget(hwnd: HWND) {
     let _ = GetClientRect(hwnd, &mut rect);
     let width = (rect.right - rect.left).max(1);
     let height = (rect.bottom - rect.top).max(1);
+    let buffer = {
+        let memory_dc = CreateCompatibleDC(target_hdc);
+        if memory_dc.0 != 0 {
+            let memory_bitmap = CreateCompatibleBitmap(target_hdc, width, height);
+            if memory_bitmap.0 != 0 {
+                let old_bitmap = SelectObject(memory_dc, memory_bitmap);
+                Some((memory_dc, memory_bitmap, old_bitmap))
+            } else {
+                let _ = DeleteDC(memory_dc);
+                None
+            }
+        } else {
+            None
+        }
+    };
+    let hdc = buffer
+        .as_ref()
+        .map(|(memory_dc, _, _)| HDC(memory_dc.0))
+        .unwrap_or(target_hdc);
+
     let transparent_brush = CreateSolidBrush(taskbar_widget_transparent_color());
     let _ = FillRect(hdc, &rect, transparent_brush);
 
@@ -589,9 +710,10 @@ unsafe fn paint_taskbar_traffic_widget(hwnd: HWND) {
     }
 
     let baseline_pen = CreatePen(PS_SOLID, 1, rgb(172, 178, 188));
-    let _ = SelectObject(hdc, baseline_pen);
+    let old_pen = SelectObject(hdc, baseline_pen);
     let _ = MoveToEx(hdc, graph_rect.left, graph_rect.bottom, None);
     let _ = LineTo(hdc, graph_rect.right, graph_rect.bottom);
+    let _ = SelectObject(hdc, old_pen);
 
     let font = create_smooth_ui_font_bold((11.0 * scale).round().max(1.0) as i32);
     let arrow_font = create_smooth_ui_font((15.0 * scale).round().max(1.0) as i32);
@@ -644,6 +766,12 @@ unsafe fn paint_taskbar_traffic_widget(hwnd: HWND) {
     let _ = DeleteObject(transparent_brush);
     let _ = DeleteObject(graph_brush);
     let _ = DeleteObject(baseline_pen);
+    if let Some((memory_dc, memory_bitmap, old_bitmap)) = buffer {
+        let _ = BitBlt(target_hdc, 0, 0, width, height, memory_dc, 0, 0, SRCCOPY);
+        let _ = SelectObject(memory_dc, old_bitmap);
+        let _ = DeleteObject(memory_bitmap);
+        let _ = DeleteDC(memory_dc);
+    }
     let _ = EndPaint(hwnd, &paint);
 }
 
@@ -907,10 +1035,22 @@ impl AppState {
 
     #[cfg(target_os = "windows")]
     pub(super) fn update_taskbar_traffic_widget(&mut self) {
-        set_taskbar_traffic_widget_worker_enabled(self.taskbar_widget_enabled);
-        let anchor = self.taskbar_widget_anchor();
+        let widget_available = taskbar_alignment_is_centered();
+        let widget_enabled = self.taskbar_widget_enabled && widget_available;
+        set_taskbar_traffic_widget_worker_enabled(widget_enabled);
+
+        if !widget_available && self.taskbar_widget_window.is_some() {
+            self.destroy_taskbar_traffic_widget();
+            return;
+        }
+
+        let anchor = if widget_enabled {
+            self.taskbar_widget_anchor()
+        } else {
+            None
+        };
         let snapshot = TaskbarTrafficWidgetSnapshot {
-            visible: self.service_active && self.taskbar_widget_enabled,
+            visible: self.service_active && widget_enabled,
             upload_bps: self.last_upload_bps,
             download_bps: self.last_download_bps,
             history: self
@@ -919,10 +1059,7 @@ impl AppState {
                 .map(|point| (point.upload_bps, point.download_bps))
                 .collect(),
         };
-
-        if let Ok(mut guard) = taskbar_traffic_widget_data().lock() {
-            *guard = snapshot.clone();
-        }
+        let snapshot_changed = replace_taskbar_traffic_widget_snapshot(snapshot.clone());
 
         let Some(existing_hwnd) = self.taskbar_widget_window else {
             if !snapshot.visible {
@@ -956,9 +1093,10 @@ impl AppState {
                 return;
             };
 
-            position_taskbar_traffic_widget(existing_hwnd, anchor);
-            let _ = ShowWindow(existing_hwnd, SW_SHOWNOACTIVATE);
-            let _ = InvalidateRect(existing_hwnd, None, false);
+            let positioned = position_taskbar_traffic_widget(existing_hwnd, anchor);
+            if snapshot_changed || positioned {
+                let _ = InvalidateRect(existing_hwnd, None, false);
+            }
         }
     }
 

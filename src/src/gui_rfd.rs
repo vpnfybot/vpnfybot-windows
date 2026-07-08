@@ -68,8 +68,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     AdjustWindowRectEx, CallWindowProcW, ChangeWindowMessageFilterEx, CreateIconIndirect,
     DestroyIcon, EnumChildWindows, FindWindowW, GetAncestor, SendMessageW, SetForegroundWindow,
     SetWindowLongPtrW, ShowWindow, GA_ROOT, GWLP_WNDPROC, HICON, ICONINFO, MSGFLT_ALLOW,
-    SIZE_MINIMIZED, SW_HIDE, SW_RESTORE, SW_SHOWNOACTIVATE, SW_SHOWNORMAL, WINDOW_EX_STYLE,
-    WINDOW_STYLE, WM_APP, WM_COPYDATA, WM_DROPFILES, WM_RBUTTONUP, WM_SETFONT, WM_SIZE, WNDPROC,
+    SIZE_MINIMIZED, SW_HIDE, SW_RESTORE, SW_SHOWNORMAL, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
+    WM_COPYDATA, WM_DROPFILES, WM_RBUTTONUP, WM_SETFONT, WM_SIZE, WNDPROC,
 };
 use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
 

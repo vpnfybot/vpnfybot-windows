@@ -1,0 +1,11 @@
+C:\Users\qwe\Documents\GitHub_vpnfybot\vpnfybot-windows\src\target\release\deps\float_cmp-b73a0f9ab1099273.d: C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\lib.rs C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\macros.rs C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\ulps.rs C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\ulps_eq.rs C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\eq.rs
+
+C:\Users\qwe\Documents\GitHub_vpnfybot\vpnfybot-windows\src\target\release\deps\libfloat_cmp-b73a0f9ab1099273.rlib: C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\lib.rs C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\macros.rs C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\ulps.rs C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\ulps_eq.rs C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\eq.rs
+
+C:\Users\qwe\Documents\GitHub_vpnfybot\vpnfybot-windows\src\target\release\deps\libfloat_cmp-b73a0f9ab1099273.rmeta: C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\lib.rs C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\macros.rs C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\ulps.rs C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\ulps_eq.rs C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\eq.rs
+
+C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\lib.rs:
+C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\macros.rs:
+C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\ulps.rs:
+C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\ulps_eq.rs:
+C:\Users\qwe\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\float-cmp-0.9.0\src\eq.rs:

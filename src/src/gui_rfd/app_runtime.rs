@@ -1,11 +1,12 @@
-use super::*;
 #[cfg(target_os = "windows")]
 use super::app_windows::{
     publish_taskbar_traffic_widget_snapshot, set_taskbar_traffic_widget_worker_enabled,
 };
+use super::*;
 
 const SUBSCRIPTION_SCHEDULED_TASK_NAME: &str = "vpnfybot-windows-subscription-check";
 const SUBSCRIPTION_SCHEDULED_TASK_ARG: &str = "/subscription-check";
+const ELEVATED_MAIN_ARG: &str = "/elevated-main";
 
 impl Default for AppState {
     fn default() -> Self {
@@ -961,6 +962,17 @@ fn run_legacy_subscription_check_cleanup_mode() -> ! {
 }
 
 pub(crate) fn launch_self_elevated(arguments: &[OsString]) -> Result<(), String> {
+    launch_self_elevated_with_window_mode(arguments, false)
+}
+
+fn launch_self_elevated_visible(arguments: &[OsString]) -> Result<(), String> {
+    launch_self_elevated_with_window_mode(arguments, true)
+}
+
+fn launch_self_elevated_with_window_mode(
+    arguments: &[OsString],
+    show_window: bool,
+) -> Result<(), String> {
     let exe = match env::current_exe() {
         Ok(path) => path,
         Err(e) => return Err(format!("Не удалось определить путь к приложению: {}", e)),
@@ -987,7 +999,7 @@ pub(crate) fn launch_self_elevated(arguments: &[OsString]) -> Result<(), String>
                 PCWSTR(params_w.as_ptr())
             },
             PCWSTR::null(),
-            SW_HIDE,
+            if show_window { SW_SHOWNORMAL } else { SW_HIDE },
         )
     };
 
@@ -998,6 +1010,27 @@ pub(crate) fn launch_self_elevated(arguments: &[OsString]) -> Result<(), String>
             "Не удалось запустить elevated helper (ShellExecuteW code {})",
             result.0 as isize
         ))
+    }
+}
+
+fn restart_main_elevated_if_needed(args: &[OsString]) {
+    if is_elevated()
+        || args
+            .get(1)
+            .is_some_and(|arg| arg == OsStr::new(ELEVATED_MAIN_ARG))
+    {
+        return;
+    }
+
+    match launch_self_elevated_visible(&[OsString::from(ELEVATED_MAIN_ARG)]) {
+        Ok(()) => std::process::exit(0),
+        Err(error) => {
+            eprintln!(
+                "Не удалось перезапустить приложение с правами администратора: {}",
+                error
+            );
+            std::process::exit(1);
+        }
     }
 }
 
@@ -1169,6 +1202,8 @@ pub(crate) fn app_main() -> eframe::Result<()> {
     if args.len() >= 3 && args[1] == OsStr::new("/stop-service") {
         run_stop_wireproxy_mode(&args[2]);
     }
+
+    restart_main_elevated_if_needed(&args);
 
     if !check_single_instance() {
         std::process::exit(0);

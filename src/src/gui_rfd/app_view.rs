@@ -1,4 +1,4 @@
-use super::app_windows::{open_url, show_error_dialog};
+use super::app_windows::{open_url, show_error_dialog, taskbar_alignment_is_centered};
 use super::*;
 
 impl App for AppState {
@@ -2094,7 +2094,11 @@ impl App for AppState {
                                         } else {
                                             self.language.translate("В режиме \"Вся система\" сайты из списка \"Исключенные сайты\" и приложения из списка \"Исключенные приложения\" будут исключены из VPN туннеля")
                                         };
-                                        let widget_button_text = if self.taskbar_widget_enabled {
+                                        let taskbar_widget_available =
+                                            taskbar_alignment_is_centered();
+                                        let taskbar_widget_effective_enabled =
+                                            self.taskbar_widget_enabled && taskbar_widget_available;
+                                        let widget_button_text = if taskbar_widget_effective_enabled {
                                             self.language.translate("Виджет: включено")
                                         } else {
                                             self.language.translate("Виджет: выключено")
@@ -2320,10 +2324,18 @@ impl App for AppState {
                                         let widget_response = ui.interact(
                                             widget_rect,
                                             ui.id().with("settings_taskbar_widget_button"),
-                                            egui::Sense::click(),
+                                            if taskbar_widget_available {
+                                                egui::Sense::click()
+                                            } else {
+                                                egui::Sense::hover()
+                                            },
                                         );
-                                        let widget_alpha_val = button_alpha(&widget_response, 255);
-                                        let widget_fill = if self.taskbar_widget_enabled {
+                                        let widget_alpha_val = if taskbar_widget_available {
+                                            button_alpha(&widget_response, 255)
+                                        } else {
+                                            128
+                                        };
+                                        let widget_fill = if taskbar_widget_effective_enabled {
                                             egui::Color32::from_rgba_unmultiplied(
                                                 255,
                                                 255,
@@ -2351,8 +2363,8 @@ impl App for AppState {
                                             let w_px = (widget_rect.width() * ppp).ceil() as usize;
                                             let h_px = (widget_rect.height() * ppp).ceil() as usize;
                                             let key = format!(
-                                                "settings_taskbar_widget:{}:{}:{}",
-                                                widget_button_text, w_px, h_px
+                                                "settings_taskbar_widget:{}:{}:{}:{}",
+                                                widget_button_text, w_px, h_px, widget_alpha_val
                                             );
 
                                             if let Some(tex) = self.win_text_cache.get(&key) {
@@ -2404,8 +2416,12 @@ impl App for AppState {
                                                 widget_text_color,
                                             );
                                         }
-                                        apply_button_cursor(ctx, &widget_response, true);
-                                        if widget_response.clicked() {
+                                        apply_button_cursor(
+                                            ctx,
+                                            &widget_response,
+                                            taskbar_widget_available,
+                                        );
+                                        if widget_response.clicked() && taskbar_widget_available {
                                             self.taskbar_widget_enabled = !self.taskbar_widget_enabled;
                                             save_taskbar_widget_enabled(self.taskbar_widget_enabled);
                                             #[cfg(target_os = "windows")]
