@@ -23,6 +23,7 @@ pub struct EmbeddedDeps {
     pub proxybridge_core: EmbeddedDep,
     pub proxybridge_cli: EmbeddedDep,
     pub wireproxy: EmbeddedDep,
+    pub wireproxy_hyperwg: EmbeddedDep,
     pub windivert: EmbeddedDep,
     pub windivert_sys: EmbeddedDep,
 }
@@ -50,6 +51,11 @@ static EMBEDDED_DEPS: EmbeddedDeps = EmbeddedDeps {
         file_name: "wireproxy.exe",
         compressed: include_bytes!(concat!(env!("OUT_DIR"), "/wireproxy.exe.zst")),
         original_size: WIREPROXY_EXE_ORIGINAL_SIZE,
+    },
+    wireproxy_hyperwg: EmbeddedDep {
+        file_name: "wireproxy-hyperwg.exe",
+        compressed: include_bytes!(concat!(env!("OUT_DIR"), "/wireproxy-hyperwg.exe.zst")),
+        original_size: WIREPROXY_HYPERWG_EXE_ORIGINAL_SIZE,
     },
     windivert: EmbeddedDep {
         file_name: "WinDivert.dll",
@@ -83,6 +89,10 @@ fn extracted_deps_match(extracted: &ExtractedDeps) -> bool {
     embedded_dep_matches(&extracted.proxybridge_cli, deps.proxybridge_cli.original_size)
         && embedded_dep_matches(&extracted.proxybridge_core, deps.proxybridge_core.original_size)
         && embedded_dep_matches(&extracted.wireproxy, deps.wireproxy.original_size)
+        && embedded_dep_matches(
+            &extracted.wireproxy_hyperwg,
+            deps.wireproxy_hyperwg.original_size,
+        )
         && embedded_dep_matches(&extracted.windivert, deps.windivert.original_size)
         && embedded_dep_matches(&extracted.windivert_sys, deps.windivert_sys.original_size)
 }
@@ -111,6 +121,7 @@ pub fn extract_all_dependencies() -> Result<ExtractedDeps, Box<dyn Error>> {
     let proxybridge_cli = extract_embedded_dep(&deps.proxybridge_cli)?;
     let proxybridge_core = extract_embedded_dep(&deps.proxybridge_core)?;
     let wireproxy = extract_embedded_dep(&deps.wireproxy)?;
+    let wireproxy_hyperwg = extract_embedded_dep(&deps.wireproxy_hyperwg)?;
     let windivert = extract_embedded_dep(&deps.windivert)?;
     let windivert_sys = extract_embedded_dep(&deps.windivert_sys)?;
 
@@ -118,6 +129,7 @@ pub fn extract_all_dependencies() -> Result<ExtractedDeps, Box<dyn Error>> {
         proxybridge_cli,
         proxybridge_core,
         wireproxy,
+        wireproxy_hyperwg,
         windivert,
         windivert_sys,
     })
@@ -130,6 +142,7 @@ pub struct ExtractedDeps {
     #[allow(dead_code)]
     pub proxybridge_core: PathBuf,
     pub wireproxy: PathBuf,
+    pub wireproxy_hyperwg: PathBuf,
     #[allow(dead_code)]
     pub windivert: PathBuf,
     #[allow(dead_code)]

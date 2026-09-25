@@ -989,7 +989,7 @@ impl App for AppState {
                             .unwrap_or(conf.as_str())
                             .to_string()
                     } else {
-                        "Wireguard / AmneziaWG".to_owned()
+                        "WireGuard / AmneziaWG / HyperWG".to_owned()
                     };
                     let import_button_enabled = !(self.service_running || self.service_active);
                     let import_button_interactive =
@@ -1011,14 +1011,23 @@ impl App for AppState {
                     } else {
                         import_button_alpha
                     };
-                    if self.imported_conf_is_amnezia_wireguard && import_button_alpha > 0 {
+                    let protocol_label = match self.imported_conf_protocol {
+                        ImportedConfigProtocol::AmneziaWireGuard => {
+                            Some(AMNEZIA_WIREGUARD_DISPLAY_LABEL)
+                        }
+                        ImportedConfigProtocol::HyperWg => Some(HYPERWG_DISPLAY_LABEL),
+                        ImportedConfigProtocol::WireGuard => None,
+                    };
+                    if let Some(protocol_label) =
+                        protocol_label.filter(|_| import_button_alpha > 0)
+                    {
                         let label_alpha = ((render_import_alpha as f32) * 0.82)
                             .round()
                             .clamp(0.0, 255.0) as u8;
                         ui.painter().text(
                             egui::pos2(button_rect.center().x, button_rect.min.y - 6.0),
                             egui::Align2::CENTER_BOTTOM,
-                            AMNEZIA_WIREGUARD_DISPLAY_LABEL,
+                            protocol_label,
                             egui::FontId::proportional(13.0),
                             egui::Color32::from_rgba_unmultiplied(
                                 255,
@@ -1154,7 +1163,10 @@ impl App for AppState {
                     }
                     if import_button_interactive && import_button_response.clicked() {
                         if let Some(path) = FileDialog::new()
-                            .add_filter("WireGuard / Amnezia-WireGuard config", &["conf"])
+                            .add_filter(
+                                "WireGuard / AmneziaWG / HyperWG config",
+                                &["conf", "hyperwg", "hwg"],
+                            )
                             .pick_file()
                         {
                             let selected_path = path.display().to_string();
@@ -1340,7 +1352,7 @@ impl App for AppState {
                         } else {
                             self.status = self
                                 .language
-                                .translate("Сначала импортируйте .conf файл")
+                                .translate("Сначала импортируйте конфигурацию")
                                 .to_owned();
                             show_error_dialog("Ошибка", &self.status);
                         }

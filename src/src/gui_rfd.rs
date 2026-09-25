@@ -85,6 +85,8 @@ mod dns_manager;
 mod embedded_deps_bytes;
 #[path = "gui_rfd/error_dialog.rs"]
 mod error_dialog;
+#[path = "gui_rfd/hyperwg.rs"]
+mod hyperwg;
 #[path = "gui_rfd/process_editor.rs"]
 mod process_editor;
 #[path = "gui_rfd/site_editor.rs"]
@@ -98,6 +100,7 @@ mod update_check;
 
 use self::app_storage::*;
 use self::dns_manager::*;
+use self::hyperwg::*;
 use self::tunnel_service::*;
 use self::ui_helpers::*;
 
@@ -147,6 +150,14 @@ const UI_BUTTON_FONT_SIZE: f32 = 14.0;
 const BUTTON_FONT_FAMILY_NAME: &str = "vpnfy_button_font";
 const TUNNEL_TRAFFIC_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const AMNEZIA_WIREGUARD_DISPLAY_LABEL: &str = "AmneziaWG";
+const HYPERWG_DISPLAY_LABEL: &str = "HyperWG";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImportedConfigProtocol {
+    WireGuard,
+    AmneziaWireGuard,
+    HyperWg,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Language {
@@ -175,7 +186,7 @@ impl Language {
                 "Импорт" => "Import",
                 "Подключиться" => "Connect",
                 "Отключиться" => "Disconnect",
-                "Сначала импортируйте .conf файл" => "Please import .conf file first",
+                "Сначала импортируйте конфигурацию" => "Please import a configuration first",
                 "Нужны права администратора. Запустите приложение от имени администратора" => "Administrator rights required. Run the app as administrator",
                 "Отключите туннель перед импортом конфигурации" => "Disconnect the tunnel before importing configuration",
                 "Вся система" => "Whole system",
@@ -223,7 +234,7 @@ impl Language {
 
 struct AppState {
     conf_path: Option<String>,
-    imported_conf_is_amnezia_wireguard: bool,
+    imported_conf_protocol: ImportedConfigProtocol,
     status: String,
     error_log: Option<String>,
     status_rx: Option<Receiver<ServiceResult>>,

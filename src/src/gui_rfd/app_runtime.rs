@@ -7,9 +7,10 @@ const ELEVATED_MAIN_ARG: &str = "/elevated-main";
 impl Default for AppState {
     fn default() -> Self {
         let conf_path = load_saved_conf_path();
-        let imported_conf_is_amnezia_wireguard = conf_path
+        let imported_conf_protocol = conf_path
             .as_deref()
-            .is_some_and(is_amnezia_wireguard_config_path);
+            .map(detect_imported_config_protocol_path)
+            .unwrap_or(ImportedConfigProtocol::WireGuard);
         let status = String::new();
         let selected_processes = load_selected_processes();
         let selected_sites = load_selected_sites();
@@ -18,7 +19,7 @@ impl Default for AppState {
 
         let mut s = Self {
             conf_path,
-            imported_conf_is_amnezia_wireguard,
+            imported_conf_protocol,
             status,
             error_log: None,
             status_rx: None,
@@ -93,7 +94,7 @@ impl Default for AppState {
 
 impl AppState {
     pub(super) fn set_imported_conf_path(&mut self, path: String) {
-        self.imported_conf_is_amnezia_wireguard = is_amnezia_wireguard_config_path(&path);
+        self.imported_conf_protocol = detect_imported_config_protocol_path(&path);
         self.conf_path = Some(path);
         self.error_log = None;
         save_conf_path(self.conf_path.as_ref().unwrap());
@@ -375,7 +376,7 @@ impl AppState {
             log::warn!("Failed to restore DNS while resetting settings: {}", error);
         }
         self.conf_path = None;
-        self.imported_conf_is_amnezia_wireguard = false;
+        self.imported_conf_protocol = ImportedConfigProtocol::WireGuard;
         self.selected_processes.clear();
         self.selected_sites.clear();
         self.proxy_mode_toggle = false;
@@ -414,6 +415,16 @@ pub(super) fn is_amnezia_wireguard_config_path(conf_path: &str) -> bool {
     fs::read_to_string(conf_path)
         .map(|config| is_amnezia_wireguard_config_content(&config))
         .unwrap_or(false)
+}
+
+fn detect_imported_config_protocol_path(conf_path: &str) -> ImportedConfigProtocol {
+    if is_hyperwg_config_path(conf_path) {
+        ImportedConfigProtocol::HyperWg
+    } else if is_amnezia_wireguard_config_path(conf_path) {
+        ImportedConfigProtocol::AmneziaWireGuard
+    } else {
+        ImportedConfigProtocol::WireGuard
+    }
 }
 
 fn is_amnezia_wireguard_config_content(config: &str) -> bool {
@@ -986,11 +997,16 @@ pub(crate) fn ensure_firewall_rules() -> Result<(), String> {
 
     install_firewall_rules(
         deps.wireproxy.to_string_lossy().as_ref(),
+        deps.wireproxy_hyperwg.to_string_lossy().as_ref(),
         deps.proxybridge_cli.to_string_lossy().as_ref(),
     )
 }
 
-fn install_firewall_rules(wireproxy_path: &str, proxybridge_path: &str) -> Result<(), String> {
+fn install_firewall_rules(
+    wireproxy_path: &str,
+    hyperwg_wireproxy_path: &str,
+    proxybridge_path: &str,
+) -> Result<(), String> {
     let script = format!(
         r#"
 # Функция для добавления или обновления правила брандмауэра
@@ -1031,6 +1047,7 @@ function Set-FirewallRule {{
 }}
 
 Set-FirewallRule -RuleName "vpnfybot-windows - wireproxy (incoming)" -ProgramPath "{wireproxy_path}"
+Set-FirewallRule -RuleName "vpnfybot-windows - HyperWG wireproxy (incoming)" -ProgramPath "{hyperwg_wireproxy_path}"
 Set-FirewallRule -RuleName "vpnfybot-windows - ProxyBridge (incoming)" -ProgramPath "{proxybridge_path}"
 "#
     );
@@ -1193,7 +1210,15 @@ fn run_wireproxy_mode(conf: &OsStr, info_addr: Option<&OsStr>) -> ! {
         );
     }
 
-    let mut command = std::process::Command::new(&deps.wireproxy);
+    let use_hyperwg_core = fs::read_to_string(conf_path.as_ref())
+        .map(|content| is_hyperwg_native_config_content(&content))
+        .unwrap_or(false);
+    let wireproxy = if use_hyperwg_core {
+        &deps.wireproxy_hyperwg
+    } else {
+        &deps.wireproxy
+    };
+    let mut command = std::process::Command::new(wireproxy);
     command
         .arg("-c")
         .arg(conf_path.as_ref())

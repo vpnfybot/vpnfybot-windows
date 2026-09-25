@@ -3399,12 +3399,13 @@ checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 
 [[package]]
 name = "wg-gui"
-version = "4.1.8"
+version = "4.2.0"
 dependencies = [
  "anyhow",
  "eframe",
  "egui",
  "embed-resource",
+ "getrandom 0.2.17",
  "image",
  "libloading",
  "log",
@@ -3415,6 +3416,7 @@ dependencies = [
  "serde_json",
  "sysinfo",
  "ureq",
+ "url",
  "windows 0.48.0",
  "zstd",
 ]

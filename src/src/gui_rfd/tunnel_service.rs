@@ -22,10 +22,10 @@ struct ProcessListCache {
     refreshed_at: Instant,
 }
 
-fn save_config_to_cache(conf_path: &str) {
+fn save_config_to_cache(conf_path: &str, runtime_config: &str) {
     let cache_dir = super::managed_cache_dir();
 
-    if let Ok(config_content) = fs::read_to_string(conf_path) {
+    if !runtime_config.is_empty() {
         let original_name = Path::new(conf_path)
             .file_stem()
             .and_then(|s| s.to_str())
@@ -39,8 +39,7 @@ fn save_config_to_cache(conf_path: &str) {
         let temp_config_name = format!("{}_wireproxy_{}.conf", original_name, timestamp);
         let temp_config_path = cache_dir.join(&temp_config_name);
 
-        let final_config = normalize_wireproxy_config(&config_content);
-        let _ = fs::write(&temp_config_path, final_config);
+        let _ = fs::write(&temp_config_path, runtime_config);
     }
 }
 
@@ -714,7 +713,23 @@ pub(super) fn create_and_start_service(conf: &str) -> ServiceResult {
         }
     };
 
-    let final_config = normalize_wireproxy_config(&config_content);
+    let provisioning_is_hyperwg = is_hyperwg_config_content(&config_content);
+    let (native_config, evicted_device_id) = if provisioning_is_hyperwg {
+        match prepare_hyperwg_runtime_config(&config_content) {
+            Ok(prepared) => (prepared.native_config, prepared.evicted_device_id),
+            Err(error) => {
+                return ServiceResult {
+                    message: error.clone(),
+                    active: false,
+                    error_log: Some(error),
+                    wireproxy_info_addr: None,
+                };
+            }
+        }
+    } else {
+        (config_content, None)
+    };
+    let final_config = normalize_wireproxy_config(&native_config);
 
     let runtime_config_path = super::managed_cache_dir().join("vpnfy_wireproxy_temp.conf");
     if let Err(e) = fs::write(&runtime_config_path, &final_config) {
@@ -738,7 +753,12 @@ pub(super) fn create_and_start_service(conf: &str) -> ServiceResult {
         }
     };
 
-    let wireproxy_exe = deps.wireproxy;
+    let wireproxy_exe =
+        if provisioning_is_hyperwg || is_hyperwg_native_config_content(&final_config) {
+            deps.wireproxy_hyperwg
+        } else {
+            deps.wireproxy
+        };
     let wireproxy_info_addr = match allocate_wireproxy_info_addr() {
         Ok(addr) => addr,
         Err(e) => {
@@ -777,16 +797,10 @@ pub(super) fn create_and_start_service(conf: &str) -> ServiceResult {
             };
         }
 
-        save_config_to_cache(conf);
+        save_config_to_cache(conf, &final_config);
 
         return ServiceResult {
-            message: format!(
-                "Wireproxy запущен для конфига {}",
-                Path::new(conf)
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("tunnel")
-            ),
+            message: wireproxy_started_message(conf, evicted_device_id.as_deref()),
             active: true,
             error_log: None,
             wireproxy_info_addr: Some(wireproxy_info_addr),
@@ -822,16 +836,10 @@ pub(super) fn create_and_start_service(conf: &str) -> ServiceResult {
                 };
             }
 
-            save_config_to_cache(conf);
+            save_config_to_cache(conf, &final_config);
 
             ServiceResult {
-                message: format!(
-                    "Wireproxy запущен для конфига {}",
-                    Path::new(conf)
-                        .file_name()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("tunnel")
-                ),
+                message: wireproxy_started_message(conf, evicted_device_id.as_deref()),
                 active: true,
                 error_log: None,
                 wireproxy_info_addr: Some(wireproxy_info_addr),
@@ -846,6 +854,20 @@ pub(super) fn create_and_start_service(conf: &str) -> ServiceResult {
     }
 }
 
+fn wireproxy_started_message(conf: &str, evicted_device_id: Option<&str>) -> String {
+    let name = Path::new(conf)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("tunnel");
+    match evicted_device_id {
+        Some(device_id) => format!(
+            "Wireproxy запущен для {}. Лимит устройств заменил HyperWG-устройство {}",
+            name, device_id
+        ),
+        None => format!("Wireproxy запущен для конфига {}", name),
+    }
+}
+
 pub(super) fn stop_and_delete_service(conf: &str) -> ServiceResult {
     let config_path = Path::new(conf)
         .canonicalize()
@@ -857,7 +879,9 @@ pub(super) fn stop_and_delete_service(conf: &str) -> ServiceResult {
         .to_string();
 
     let matches_target_process = |process: &sysinfo::Process| {
-        if !process_name_matches(process, "wireproxy.exe") {
+        if !process_name_matches(process, "wireproxy.exe")
+            && !process_name_matches(process, "wireproxy-hyperwg.exe")
+        {
             return false;
         }
 
@@ -921,6 +945,7 @@ pub(super) fn stop_and_delete_service(conf: &str) -> ServiceResult {
 
     if any_process_matches(matches_target_process) {
         fallback_taskkill_image("wireproxy.exe");
+        fallback_taskkill_image("wireproxy-hyperwg.exe");
         killed = true;
         let _ = wait_until_processes_exit(matches_target_process, PROCESS_EXIT_WAIT_TIMEOUT);
     }
@@ -1139,6 +1164,7 @@ pub(super) fn start_proxybridge(
     let append_internal_direct_rules = |rules: &mut Vec<String>| {
         rules.push("ProxyBridge_CLI.exe:*:*:BOTH:DIRECT".to_string());
         rules.push("wireproxy.exe:*:*:BOTH:DIRECT".to_string());
+        rules.push("wireproxy-hyperwg.exe:*:*:BOTH:DIRECT".to_string());
 
         if let (Some(process_name), Some(info_addr)) =
             (current_exe_name.as_deref(), wireproxy_info_addr)

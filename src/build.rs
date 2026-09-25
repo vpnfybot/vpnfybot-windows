@@ -47,6 +47,7 @@ fn prepare_embedded_deps(
         "ProxyBridgeCore.dll",
         "ProxyBridge_CLI.exe",
         "wireproxy.exe",
+        "wireproxy-hyperwg.exe",
         "WinDivert.dll",
         "WinDivert64.sys",
     ];
@@ -86,6 +87,10 @@ fn copy_dependencies(manifest_dir: &Path) {
         ("ProxyBridgeCore.dll", embedded_deps_dir.join("ProxyBridgeCore.dll")),
         ("ProxyBridge_CLI.exe", embedded_deps_dir.join("ProxyBridge_CLI.exe")),
         ("wireproxy.exe", embedded_deps_dir.join("wireproxy.exe")),
+        (
+            "wireproxy-hyperwg.exe",
+            embedded_deps_dir.join("wireproxy-hyperwg.exe"),
+        ),
         ("WinDivert.dll", embedded_deps_dir.join("WinDivert.dll")),
         ("WinDivert64.sys", embedded_deps_dir.join("WinDivert64.sys")),
     ];

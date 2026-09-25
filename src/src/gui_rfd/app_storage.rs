@@ -9,7 +9,7 @@ pub(super) fn managed_logs_dir() -> PathBuf {
     ensure_managed_dir(app_dirs::get_logs_dir())
 }
 
-fn managed_configs_dir() -> PathBuf {
+pub(super) fn managed_configs_dir() -> PathBuf {
     ensure_managed_dir(app_dirs::get_configs_dir())
 }
 

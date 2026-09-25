@@ -209,11 +209,7 @@ unsafe extern "system" fn subclass_wndproc(
                 }
                 buffer.truncate(length);
                 if let Ok(path) = OsString::from_wide(&buffer).into_string() {
-                    if Path::new(&path)
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .map_or(false, |ext| ext.eq_ignore_ascii_case("conf"))
-                    {
+                    if is_supported_config_extension(Path::new(&path)) {
                         let drop_storage = DROP_FILE_PATH.get_or_init(|| Mutex::new(None));
                         let mut guard = drop_storage.lock().unwrap();
                         *guard = Some(path);
@@ -450,7 +446,10 @@ impl AppState {
                 input.raw.dropped_files.iter().find_map(|file| {
                     let path = file.path.as_ref()?;
                     let extension = path.extension().and_then(|ext| ext.to_str())?;
-                    if extension.eq_ignore_ascii_case("conf") {
+                    if matches!(
+                        extension.to_ascii_lowercase().as_str(),
+                        "conf" | "hyperwg" | "hwg"
+                    ) {
                         Some(path.to_string_lossy().to_string())
                     } else {
                         None
@@ -481,4 +480,15 @@ impl AppState {
 
         self.set_imported_conf_path(path);
     }
+}
+
+fn is_supported_config_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "conf" | "hyperwg" | "hwg"
+            )
+        })
 }

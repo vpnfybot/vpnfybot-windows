@@ -1,4 +1,4 @@
-# WireGuard / AmneziaWG Split-Tunneling Solution 👻
+# WireGuard / AmneziaWG / HyperWG Split-Tunneling Solution 👻
 ### Powered by WireProxy + ProxyBridge w/ WinDivert
 
 <p align="center">
@@ -19,7 +19,7 @@
 
 ## 🚀 About
 
-A lightweight Windows application that brings **true split tunneling** to WireGuard
+A lightweight Windows application that brings **true split tunneling** to WireGuard, AmneziaWG, and HyperWG
 Route only selected apps and websites through your VPN — or exclude them completely
 
 Built on top of:
@@ -49,7 +49,7 @@ Built on top of:
   - 🇷🇺 Russian  
 
 - ⚡ **Simple configuration**  
-  Just import your `.conf` file and connect (.conf file can be obtained for free from <a href="https://t.me/vpnfybot">@vpnfybot</a>)
+  Import a `.conf`, `.hyperwg`, or `.hwg` file and connect. For HyperWG v2 the app enrolls this device over HTTPS, creates the client-owned obfuscation parameters, and selects a dedicated compatible core
 
 ---
 
