@@ -1,4 +1,4 @@
-# Решение для раздельного туннелирования WireGuard / AmneziaWG / HyperWG 👻
+# Решение для раздельного туннелирования WireGuard / AmneziaWG 👻
 ### На базе WireProxy + ProxyBridge w/ WinDivert
 
 <p align="center">
