@@ -1052,6 +1052,23 @@ fn resolve_site_rule_targets(selected_sites: &[String]) -> (Vec<String>, Vec<Str
             continue;
         }
 
+        // Domain zones cannot be resolved once at startup. ProxyBridge matches
+        // these rules against domains learned from DNS responses while running.
+        if let Some(zone) = site_target.strip_prefix("*.") {
+            if !zone.is_empty() && zone.len() <= 253 && zone.split('.').all(|label| {
+                !label.is_empty()
+                    && label.len() <= 63
+                    && label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                    && !label.starts_with('-')
+                    && !label.ends_with('-')
+            }) {
+                targets.push(site_target);
+                continue;
+            }
+            unresolved_sites.push(site_target);
+            continue;
+        }
+
         let mut resolved_ips = BTreeSet::new();
         if let Ok(addresses) = (site_target.as_str(), 0).to_socket_addrs() {
             for address in addresses {
@@ -1418,6 +1435,25 @@ pub(super) fn stop_proxybridge() -> Result<(), String> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn domain_zones_are_passed_to_proxybridge_in_both_directions() {
+        let sites = vec!["*.RU".to_string(), "*.co.uk".to_string()];
+        let (proxy_rules, unresolved) = build_site_rules(&sites, "PROXY");
+        assert!(unresolved.is_empty());
+        assert_eq!(proxy_rules, ["*:*.ru:*:BOTH:PROXY", "*:*.co.uk:*:BOTH:PROXY"]);
+
+        let (direct_rules, unresolved) = build_site_rules(&sites, "DIRECT");
+        assert!(unresolved.is_empty());
+        assert_eq!(direct_rules, ["*:*.ru:*:BOTH:DIRECT", "*:*.co.uk:*:BOTH:DIRECT"]);
+    }
+
+    #[test]
+    fn malformed_domain_zone_is_not_treated_as_an_ip_filter() {
+        let (targets, unresolved) = resolve_site_rule_targets(&["*.-ru".to_string()]);
+        assert!(targets.is_empty());
+        assert_eq!(unresolved, ["*.-ru"]);
+    }
 
     fn temp_log_path(test_name: &str) -> PathBuf {
         let unique = std::time::SystemTime::now()

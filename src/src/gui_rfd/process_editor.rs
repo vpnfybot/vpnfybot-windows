@@ -31,7 +31,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use super::{
     adjusted_window_size, apply_smooth_font, create_button_ui_font, create_smooth_ui_font,
     external_editor_is_open, get_running_processes, grayscale_color, load_png_icon_handle,
-    mouse_point_from_lparam, rect_contains_point, show_existing_external_editor, to_wide,
+    main_window_outer_size, mouse_point_from_lparam, rect_contains_point,
+    show_existing_external_editor, to_wide,
     MAIN_WINDOW_CLIENT_HEIGHT, MAIN_WINDOW_CLIENT_WIDTH, PROCESSES_EDITOR_CLASS,
     PROCESS_EDITOR_GAP, PROCESS_EDITOR_PADDING, PROCESS_LIST_CLASS, PROCESS_LIST_ITEM_HEIGHT,
     PROCESS_LIST_SCROLLBAR_GAP, PROCESS_LIST_WHEEL_STEP, PROCESS_SAVE_BUTTON_HEIGHT,
@@ -116,12 +117,14 @@ pub(super) fn open_external(
 
         let window_ex_style: WINDOW_EX_STYLE = Default::default();
         let window_style = WS_OVERLAPPEDWINDOW & !WS_THICKFRAME & !WS_MAXIMIZEBOX;
-        let (window_width, window_height) = adjusted_window_size(
-            window_style,
-            window_ex_style,
-            MAIN_WINDOW_CLIENT_WIDTH,
-            MAIN_WINDOW_CLIENT_HEIGHT,
-        );
+        let (window_width, window_height) = main_window_outer_size().unwrap_or_else(|| {
+            adjusted_window_size(
+                window_style,
+                window_ex_style,
+                MAIN_WINDOW_CLIENT_WIDTH,
+                MAIN_WINDOW_CLIENT_HEIGHT,
+            )
+        });
 
         let hwnd = CreateWindowExW(
             window_ex_style,

@@ -3,7 +3,7 @@ setlocal
 pushd "%~dp0"
 
 for /f "tokens=3" %%V in ('findstr /b "version =" Cargo.toml') do set "PRODUCT_VERSION=%%~V"
-if not defined PRODUCT_VERSION set "PRODUCT_VERSION=4.0.7"
+if not defined PRODUCT_VERSION set "PRODUCT_VERSION=4.2.5"
 
 set "EXIT_CODE=0"
 set "APP_BINARY="
@@ -47,7 +47,7 @@ if errorlevel 1 exit /b %errorlevel%
 copy /Y "vpnfy.ico" "%PAYLOAD_DIR%\vpnfy.ico"
 if errorlevel 1 exit /b %errorlevel%
 
-for %%F in (ProxyBridgeCore.dll ProxyBridge_CLI.exe WinDivert.dll WinDivert64.sys wireproxy.exe) do (
+for %%F in (ProxyBridgeCore.dll ProxyBridge_CLI.exe WinDivert.dll WinDivert64.sys wireproxy.exe wireproxy-hyperwg.exe) do (
   copy /Y "embedded_deps\%%F" "%PAYLOAD_DIR%\deps\vpnfybot-windows-%PRODUCT_VERSION%\%%F"
   if errorlevel 1 exit /b %errorlevel%
 )

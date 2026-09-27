@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "windivert.h"
+#include "DnsZoneCache.h"
 
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "ws2_32.lib")
@@ -296,6 +297,8 @@ static DWORD WINAPI packet_processor(LPVOID arg)
     PWINDIVERT_IPHDR ip_header;
     PWINDIVERT_TCPHDR tcp_header;
     PWINDIVERT_UDPHDR udp_header;
+    PVOID packet_data;
+    UINT packet_data_len;
 
     while (running)
     {
@@ -308,8 +311,13 @@ static DWORD WINAPI packet_processor(LPVOID arg)
         }
 
         PWINDIVERT_IPV6HDR ipv6_header = NULL;
+        packet_data = NULL;
+        packet_data_len = 0;
         WinDivertHelperParsePacket(packet, packet_len, &ip_header, &ipv6_header, NULL,
-            NULL, NULL, &tcp_header, &udp_header, NULL, NULL, NULL, NULL);
+            NULL, NULL, &tcp_header, &udp_header, &packet_data, &packet_data_len, NULL, NULL);
+
+        if (udp_header != NULL && ntohs(udp_header->SrcPort) == 53)
+            dns_zone_observe_response((const unsigned char *)packet_data, packet_data_len);
 
         if (ip_header == NULL)
         {
@@ -866,6 +874,9 @@ static BOOL match_ip_pattern(const char *pattern, UINT32 ip)
 {
     if (pattern == NULL || strcmp(pattern, "*") == 0)
         return TRUE;
+
+    if (pattern[0] == '*' && pattern[1] == '.' && pattern[2] != '\0')
+        return dns_zone_matches(ip, pattern + 2);
 
     // check for IP range
     char *dash = strchr(pattern, '-');
@@ -3090,7 +3101,7 @@ PROXYBRIDGE_API BOOL ProxyBridge_Start(void)
     Sleep(500);
 
     snprintf(filter, sizeof(filter),
-        "(tcp and (outbound or loopback or (tcp.DstPort == %d or tcp.SrcPort == %d))) or (udp and (outbound or loopback or (udp.DstPort == %d or udp.SrcPort == %d)))",
+        "(tcp and (outbound or loopback or (tcp.DstPort == %d or tcp.SrcPort == %d))) or (udp and (outbound or loopback or udp.SrcPort == 53 or (udp.DstPort == %d or udp.SrcPort == %d)))",
         g_local_relay_port, g_local_relay_port, LOCAL_UDP_RELAY_PORT, LOCAL_UDP_RELAY_PORT);
 
     // Note: Added 'loopback' to filter to capture localhost (127.x.x.x) traffic

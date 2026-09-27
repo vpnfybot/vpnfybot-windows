@@ -1,5 +1,5 @@
 !ifndef PRODUCT_VERSION
-!define PRODUCT_VERSION "4.0.7"
+!define PRODUCT_VERSION "4.2.5"
 !endif
 
 !ifndef PAYLOAD_DIR
@@ -90,6 +90,7 @@ Function StopTunnelProcesses
   !insertmacro RunHidden '"$SYSDIR\schtasks.exe" /Delete /TN "${SUBSCRIPTION_TASK_NAME}" /F'
   !insertmacro RunHidden '"$SYSDIR\taskkill.exe" /IM "vpnfybot-windows.exe" /F /T'
   !insertmacro RunHidden '"$SYSDIR\taskkill.exe" /IM "wireproxy.exe" /F /T'
+  !insertmacro RunHidden '"$SYSDIR\taskkill.exe" /IM "wireproxy-hyperwg.exe" /F /T'
   !insertmacro RunHidden '"$SYSDIR\taskkill.exe" /IM "ProxyBridge_CLI.exe" /F /T'
   !insertmacro RunHidden '"$SYSDIR\sc.exe" stop "WinDivert"'
   !insertmacro RunHidden '"$SYSDIR\sc.exe" delete "WinDivert"'
@@ -102,6 +103,7 @@ Function un.StopTunnelProcesses
   !insertmacro RunHidden '"$SYSDIR\schtasks.exe" /Delete /TN "${SUBSCRIPTION_TASK_NAME}" /F'
   !insertmacro RunHidden '"$SYSDIR\taskkill.exe" /IM "vpnfybot-windows.exe" /F /T'
   !insertmacro RunHidden '"$SYSDIR\taskkill.exe" /IM "wireproxy.exe" /F /T'
+  !insertmacro RunHidden '"$SYSDIR\taskkill.exe" /IM "wireproxy-hyperwg.exe" /F /T'
   !insertmacro RunHidden '"$SYSDIR\taskkill.exe" /IM "ProxyBridge_CLI.exe" /F /T'
   !insertmacro RunHidden '"$SYSDIR\sc.exe" stop "WinDivert"'
   !insertmacro RunHidden '"$SYSDIR\sc.exe" delete "WinDivert"'
@@ -141,6 +143,7 @@ un_remove_installed_deps_retry:
   Delete "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\WinDivert.dll"
   Delete "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\WinDivert64.sys"
   Delete "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\wireproxy.exe"
+  Delete "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\wireproxy-hyperwg.exe"
   RMDir /r "$INSTDIR\deps\${PRODUCT_DEPS_DIR}"
 
   IfFileExists "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\WinDivert64.sys" un_remove_installed_deps_wait 0
@@ -160,6 +163,7 @@ un_remove_installed_deps_failed:
   Delete /REBOOTOK "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\WinDivert.dll"
   Delete /REBOOTOK "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\WinDivert64.sys"
   Delete /REBOOTOK "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\wireproxy.exe"
+  Delete /REBOOTOK "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\wireproxy-hyperwg.exe"
   RMDir /r /REBOOTOK "$INSTDIR\deps\${PRODUCT_DEPS_DIR}"
   SetRebootFlag true
   DetailPrint "WinDivert64.sys is still loaded; dependency cleanup was scheduled for the next reboot."
@@ -179,6 +183,7 @@ Section "Install" SEC01
   File "${PAYLOAD_DIR}\vpnfy.ico"
 
   IfFileExists "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\wireproxy.exe" 0 copy_current_deps
+  IfFileExists "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\wireproxy-hyperwg.exe" 0 copy_current_deps
   IfFileExists "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\ProxyBridge_CLI.exe" 0 copy_current_deps
   IfFileExists "$INSTDIR\deps\${PRODUCT_DEPS_DIR}\WinDivert64.sys" install_deps_ready copy_current_deps
 
@@ -189,6 +194,7 @@ copy_current_deps:
   File "${PAYLOAD_DIR}\deps\${PRODUCT_DEPS_DIR}\WinDivert.dll"
   File "${PAYLOAD_DIR}\deps\${PRODUCT_DEPS_DIR}\WinDivert64.sys"
   File "${PAYLOAD_DIR}\deps\${PRODUCT_DEPS_DIR}\wireproxy.exe"
+  File "${PAYLOAD_DIR}\deps\${PRODUCT_DEPS_DIR}\wireproxy-hyperwg.exe"
 
 install_deps_ready:
 

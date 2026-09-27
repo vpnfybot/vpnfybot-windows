@@ -41,7 +41,8 @@ use super::{
     UI_BUTTON_FONT_SIZE, adjusted_window_size, apply_smooth_font, create_button_ui_font,
     create_smooth_ui_font,
     external_editor_is_open, grayscale_color, load_png_icon_handle,
-    mouse_point_from_lparam, rect_contains_point, show_existing_external_editor, to_wide,
+    main_window_outer_size, mouse_point_from_lparam, rect_contains_point,
+    show_existing_external_editor, to_wide,
 };
 
 struct SiteEditorState {
@@ -108,12 +109,14 @@ pub(super) fn open_external(
 
         let window_ex_style: WINDOW_EX_STYLE = Default::default();
         let window_style = WS_OVERLAPPEDWINDOW & !WS_THICKFRAME & !WS_MAXIMIZEBOX;
-        let (window_width, window_height) = adjusted_window_size(
-            window_style,
-            window_ex_style,
-            MAIN_WINDOW_CLIENT_WIDTH,
-            MAIN_WINDOW_CLIENT_HEIGHT,
-        );
+        let (window_width, window_height) = main_window_outer_size().unwrap_or_else(|| {
+            adjusted_window_size(
+                window_style,
+                window_ex_style,
+                MAIN_WINDOW_CLIENT_WIDTH,
+                MAIN_WINDOW_CLIENT_HEIGHT,
+            )
+        });
 
         let hwnd = CreateWindowExW(
             window_ex_style,

@@ -989,7 +989,7 @@ impl App for AppState {
                             .unwrap_or(conf.as_str())
                             .to_string()
                     } else {
-                        "WireGuard / AmneziaWG / HyperWG".to_owned()
+                        "WireGuard / AmneziaWG".to_owned()
                     };
                     let import_button_enabled = !(self.service_running || self.service_active);
                     let import_button_interactive =
@@ -2026,15 +2026,9 @@ impl App for AppState {
                                             self.language.translate(process_label_key),
                                             self.selected_processes.len()
                                         );
-                                        let mode_text = if self.proxy_mode_toggle {
-                                            self.language
-                                                .translate("Выбранные сайты / приложения")
-                                        } else {
-                                            self.language.translate("Вся система")
-                                        };
                                         let support_text = "vpnfybot@gmail.com";
                                         let mode_description_text = if self.proxy_mode_toggle {
-                                            self.language.translate("В режиме \"Выбранные приложения\" сайты из списка \"Сайты через VPN\" и приложения из списка \"Приложения через VPN\" будут идти через VPN туннель")
+                                            self.language.translate("В режиме \"Выборочно\" сайты из списка \"Сайты через VPN\" и приложения из списка \"Приложения через VPN\" будут идти через VPN туннель")
                                         } else {
                                             self.language.translate("В режиме \"Вся система\" сайты из списка \"Исключенные сайты\" и приложения из списка \"Исключенные приложения\" будут исключены из VPN туннеля")
                                         };
@@ -2135,104 +2129,147 @@ impl App for AppState {
                                         let mut description_y =
                                             description_center_y - total_description_height * 0.5;
 
-                                        let mode_response = ui.interact(
-                                            mode_rect,
-                                            ui.id().with("settings_mode_button"),
-                                            if mode_enabled {
-                                                egui::Sense::click()
-                                            } else {
-                                                egui::Sense::hover()
-                                            },
-                                        );
-                                        let button_alpha_val = if mode_enabled {
-                                            button_alpha(&mode_response, 255)
-                                        } else {
-                                            128
-                                        };
-                                        let button_fill = if self.proxy_mode_toggle {
-                                            egui::Color32::from_rgba_unmultiplied(
-                                                255,
-                                                255,
-                                                255,
-                                                button_alpha_val,
-                                            )
-                                        } else {
-                                            egui::Color32::from_rgba_unmultiplied(
-                                                180,
-                                                80,
-                                                80,
-                                                button_alpha_val,
-                                            )
-                                        };
-                                        let text_color = egui::Color32::from_rgba_unmultiplied(
-                                            0,
-                                            0,
-                                            0,
-                                            button_alpha_val,
-                                        );
-                                        ui.painter().rect_filled(mode_rect, 6.0, button_fill);
-                                        #[cfg(target_os = "windows")]
+                                        let split_x = mode_rect.center().x;
+                                        for (selected_apps_only, label_key) in
+                                            [(true, "Выборочно"), (false, "Вся система")]
                                         {
-                                            let ppp = ctx.pixels_per_point();
-                                            let w_px = (mode_rect.width() * ppp).ceil() as usize;
-                                            let h_px = (mode_rect.height() * ppp).ceil() as usize;
-                                            let key =
-                                                format!("settings_mode:{}:{}:{}", mode_text, w_px, h_px);
-                                            let chosen_font = self.button_hfont;
-
-                                            if let Some(tex) = self.win_text_cache.get(&key) {
-                                                ui.painter().image(
-                                                    tex.id(),
-                                                    mode_rect,
-                                                    egui::Rect::from_min_max(
-                                                        egui::pos2(0.0, 0.0),
-                                                        egui::pos2(1.0, 1.0),
-                                                    ),
-                                                    egui::Color32::WHITE,
-                                                );
-                                            } else if let Some(tex) = win_text_to_texture(
-                                                ctx,
-                                                &key,
-                                                &mode_text,
-                                                chosen_font,
-                                                text_color,
-                                                w_px,
-                                                h_px,
-                                            ) {
-                                                self.win_text_cache.insert(key.clone(), tex.clone());
-                                                ui.painter().image(
-                                                    tex.id(),
-                                                    mode_rect,
-                                                    egui::Rect::from_min_max(
-                                                        egui::pos2(0.0, 0.0),
-                                                        egui::pos2(1.0, 1.0),
-                                                    ),
-                                                    egui::Color32::WHITE,
-                                                );
+                                            let segment_rect = if selected_apps_only {
+                                                egui::Rect::from_min_max(
+                                                    mode_rect.min,
+                                                    egui::pos2(split_x, mode_rect.max.y),
+                                                )
                                             } else {
-                                                ui.painter().text(
-                                                    mode_rect.center(),
-                                                    egui::Align2::CENTER_CENTER,
-                                                    mode_text,
-                                                    button_font.clone(),
+                                                egui::Rect::from_min_max(
+                                                    egui::pos2(split_x, mode_rect.min.y),
+                                                    mode_rect.max,
+                                                )
+                                            };
+                                            let response = ui.interact(
+                                                segment_rect,
+                                                ui.id().with(label_key),
+                                                if mode_enabled {
+                                                    egui::Sense::click()
+                                                } else {
+                                                    egui::Sense::hover()
+                                                },
+                                            );
+                                            let alpha = if mode_enabled {
+                                                button_alpha(&response, 255)
+                                            } else {
+                                                128
+                                            };
+                                            let selected = self.proxy_mode_toggle == selected_apps_only;
+                                            let fill = if selected {
+                                                if selected_apps_only {
+                                                    egui::Color32::from_rgba_unmultiplied(
+                                                        255, 255, 255, alpha,
+                                                    )
+                                                } else {
+                                                    egui::Color32::from_rgba_unmultiplied(
+                                                        180, 80, 80, alpha,
+                                                    )
+                                                }
+                                            } else {
+                                                egui::Color32::from_rgba_unmultiplied(
+                                                    60, 60, 60, 51,
+                                                )
+                                            };
+                                            let rounding = if selected_apps_only {
+                                                egui::Rounding {
+                                                    nw: 6.0,
+                                                    ne: 0.0,
+                                                    sw: 6.0,
+                                                    se: 0.0,
+                                                }
+                                            } else {
+                                                egui::Rounding {
+                                                    nw: 0.0,
+                                                    ne: 6.0,
+                                                    sw: 0.0,
+                                                    se: 6.0,
+                                                }
+                                            };
+                                            ui.painter().rect_filled(segment_rect, rounding, fill);
+                                            let text_color = if selected && selected_apps_only {
+                                                egui::Color32::from_rgba_unmultiplied(
+                                                    0, 0, 0, alpha,
+                                                )
+                                            } else {
+                                                egui::Color32::from_rgba_unmultiplied(
+                                                    255, 255, 255, alpha,
+                                                )
+                                            };
+                                            let label = self.language.translate(label_key);
+                                            #[cfg(target_os = "windows")]
+                                            {
+                                                let ppp = ctx.pixels_per_point();
+                                                let w_px =
+                                                    (segment_rect.width() * ppp).ceil() as usize;
+                                                let h_px =
+                                                    (segment_rect.height() * ppp).ceil() as usize;
+                                                let key = format!(
+                                                    "settings_mode:{}:{}:{}:{}:{}",
+                                                    label, selected, alpha, w_px, h_px
+                                                );
+                                                if let Some(tex) = self.win_text_cache.get(&key) {
+                                                    ui.painter().image(
+                                                        tex.id(),
+                                                        segment_rect,
+                                                        egui::Rect::from_min_max(
+                                                            egui::pos2(0.0, 0.0),
+                                                            egui::pos2(1.0, 1.0),
+                                                        ),
+                                                        egui::Color32::WHITE,
+                                                    );
+                                                } else if let Some(tex) = win_text_to_texture(
+                                                    ctx,
+                                                    &key,
+                                                    label,
+                                                    self.button_hfont,
                                                     text_color,
-                                                );
+                                                    w_px,
+                                                    h_px,
+                                                ) {
+                                                    self.win_text_cache.insert(key, tex.clone());
+                                                    ui.painter().image(
+                                                        tex.id(),
+                                                        segment_rect,
+                                                        egui::Rect::from_min_max(
+                                                            egui::pos2(0.0, 0.0),
+                                                            egui::pos2(1.0, 1.0),
+                                                        ),
+                                                        egui::Color32::WHITE,
+                                                    );
+                                                } else {
+                                                    ui.painter().text(
+                                                        segment_rect.center(),
+                                                        egui::Align2::CENTER_CENTER,
+                                                        label,
+                                                        button_font.clone(),
+                                                        text_color,
+                                                    );
+                                                }
                                             }
-                                        }
-                                        #[cfg(not(target_os = "windows"))]
-                                        {
+                                            #[cfg(not(target_os = "windows"))]
                                             ui.painter().text(
-                                                mode_rect.center(),
+                                                segment_rect.center(),
                                                 egui::Align2::CENTER_CENTER,
-                                                mode_text,
+                                                label,
                                                 button_font.clone(),
                                                 text_color,
                                             );
+                                            apply_button_cursor(ctx, &response, mode_enabled);
+                                            if response.clicked() && mode_enabled {
+                                                self.proxy_mode_toggle = selected_apps_only;
+                                            }
                                         }
-                                        apply_button_cursor(ctx, &mode_response, mode_enabled);
-                                        if mode_response.clicked() && mode_enabled {
-                                            self.proxy_mode_toggle = !self.proxy_mode_toggle;
-                                        }
+                                        ui.painter().line_segment(
+                                            [
+                                                egui::pos2(split_x, mode_rect.top()),
+                                                egui::pos2(split_x, mode_rect.bottom()),
+                                            ],
+                                            egui::Stroke::new(1.0, egui::Color32::from_gray(90)),
+                                        );
 
                                         let support_color =
                                             egui::Color32::from_white_alpha(128);

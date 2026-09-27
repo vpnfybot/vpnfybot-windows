@@ -66,7 +66,7 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AdjustWindowRectEx, CallWindowProcW, ChangeWindowMessageFilterEx, CreateIconIndirect,
-    DestroyIcon, EnumChildWindows, FindWindowW, GetAncestor, SendMessageW, SetForegroundWindow,
+    DestroyIcon, EnumChildWindows, FindWindowW, GetAncestor, GetWindowRect, SendMessageW, SetForegroundWindow,
     SetWindowLongPtrW, ShowWindow, GA_ROOT, GWLP_WNDPROC, HICON, ICONINFO, MSGFLT_ALLOW,
     SIZE_MINIMIZED, SW_HIDE, SW_RESTORE, SW_SHOWNORMAL, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
     WM_COPYDATA, WM_DROPFILES, WM_RBUTTONUP, WM_SETFONT, WM_SIZE, WNDPROC,
@@ -190,6 +190,7 @@ impl Language {
                 "Нужны права администратора. Запустите приложение от имени администратора" => "Administrator rights required. Run the app as administrator",
                 "Отключите туннель перед импортом конфигурации" => "Disconnect the tunnel before importing configuration",
                 "Вся система" => "Whole system",
+                "Выборочно" => "Selected only",
                 "Выбранные приложения" => "Selected applications",
                 "Выбранные сайты / приложения" => "Selected sites / applications",
                 "Подключен" => "Connected",
@@ -211,7 +212,7 @@ impl Language {
                 "Введите сайты, которые должны работать через VPN" => "Enter sites that should work through VPN",
                 "Режим VPN" => "VPN mode",
                 "В режиме \"Вся система\" сайты из списка \"Исключенные сайты\" и приложения из списка \"Исключенные приложения\" будут исключены из VPN туннеля" => "In the \"Whole system\" mode, sites from the \"Excluded sites\" list and apps from the \"Excluded applications\" list will be excluded from the VPN tunnel",
-                "В режиме \"Выбранные приложения\" сайты из списка \"Сайты через VPN\" и приложения из списка \"Приложения через VPN\" будут идти через VPN туннель" => "In the \"Selected applications\" mode, sites from the \"Sites via VPN\" list and apps from the \"Apps via VPN\" list will go through the VPN tunnel",
+                "В режиме \"Выборочно\" сайты из списка \"Сайты через VPN\" и приложения из списка \"Приложения через VPN\" будут идти через VPN туннель" => "In the \"Selected only\" mode, sites from the \"Sites via VPN\" list and apps from the \"Apps via VPN\" list will go through the VPN tunnel",
                 "Сохранить" => "Save",
                 "Закрыть" => "Close",
                 "Сайты" => "Sites",

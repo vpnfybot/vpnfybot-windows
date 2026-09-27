@@ -343,6 +343,25 @@ pub(super) fn adjusted_window_size(window_style: WINDOW_STYLE, window_ex_style: 
     }
 }
 
+pub(super) fn main_window_outer_size() -> Option<(i32, i32)> {
+    unsafe {
+        let title = to_wide(WINDOW_TITLE);
+        let hwnd = FindWindowW(None, PCWSTR(title.as_ptr()));
+        if hwnd.0 == 0 {
+            return None;
+        }
+
+        let mut rect = RECT::default();
+        if !GetWindowRect(hwnd, &mut rect).as_bool() {
+            return None;
+        }
+
+        let width = rect.right - rect.left;
+        let height = rect.bottom - rect.top;
+        (width > 0 && height > 0).then_some((width, height))
+    }
+}
+
 fn create_smooth_ui_font_with_weight(size_px: i32, weight: i32) -> Option<HFONT> {
     unsafe {
         let font = CreateFontW(-size_px, 0, 0, 0, weight, 0, 0, 0, 1, 0, 0, 5, 0, windows::core::w!("Segoe UI"));
